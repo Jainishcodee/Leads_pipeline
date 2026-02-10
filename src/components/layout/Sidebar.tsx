@@ -14,6 +14,7 @@ import {
 import { cn } from '@/lib/utils';
 import { mockFolders, mockOrganization, currentUser } from '@/data/mockData';
 import { Button } from '@/components/ui/button';
+import { useAuth } from '@/auth/AuthContext';
 import {
   Collapsible,
   CollapsibleContent,
@@ -36,10 +37,14 @@ interface SidebarProps {
 export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false }: SidebarProps) {
   const location = useLocation();
   const [foldersOpen, setFoldersOpen] = useState(true);
+  const { user, signOut } = useAuth();
 
   const isActive = (path: string) => location.pathname === path;
   const isFolderActive = (folderId: string) => 
     location.pathname === `/folders/${folderId}`;
+
+  const displayName = user?.displayName || user?.email?.split('@')[0] || currentUser.name;
+  const displayMeta = user?.email || currentUser.role;
 
   // Determine if sidebar should show expanded content
   const expanded = isMobile || isExpanded;
@@ -201,10 +206,16 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
                 {expanded && (
                   <>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{currentUser.name}</p>
-                      <p className="text-xs text-muted-foreground capitalize">{currentUser.role}</p>
+                      <p className="text-sm font-medium truncate">{displayName}</p>
+                      <p className="text-xs text-muted-foreground truncate">{displayMeta}</p>
                     </div>
-                    <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground flex-shrink-0">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-muted-foreground hover:text-foreground flex-shrink-0"
+                      onClick={() => signOut()}
+                      aria-label="Sign out"
+                    >
                       <LogOut className="w-4 h-4" />
                     </Button>
                   </>

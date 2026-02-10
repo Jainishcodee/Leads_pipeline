@@ -58,6 +58,7 @@ import {
 import { format, formatDistanceToNow } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import type { ActivityLog } from '@/types';
 
 export default function LeadDetail() {
   const { leadId } = useParams();
@@ -79,14 +80,18 @@ export default function LeadDetail() {
     size: number;
     createdAt: Date;
   } | null>(null);
+  const [activities, setActivities] = useState<ActivityLog[]>(() => 
+    mockActivities.filter(a => a.leadId === leadId)
+  );
+  const [tasks, setTasks] = useState(() => 
+    mockTasks.filter(t => t.leadId === leadId)
+  );
   const fileInputRef = useRef<HTMLInputElement>(null);
   const attachmentsRef = useRef(attachments);
 
   const lead = mockLeads.find(l => l.id === leadId);
   const assignments = mockAssignments.filter(a => a.leadId === leadId);
-  const tasks = mockTasks.filter(t => t.leadId === leadId);
   const messages = mockChatMessages.filter(m => m.leadId === leadId);
-  const activities = mockActivities.filter(a => a.leadId === leadId);
 
   const userById = new Map(mockUsers.map(user => [user.id, user]));
 
@@ -94,6 +99,44 @@ export default function LeadDetail() {
     if (status === 'done') return 'Completed';
     if (status === 'in_progress') return 'Ongoing';
     return 'Pending';
+  };
+
+  const handleTaskStatusChange = (taskId: string, newStatus: string, taskTitle: string) => {
+    // Find the task to get the old status
+    const task = tasks.find(t => t.id === taskId);
+    if (!task) return;
+
+    const oldStatus = task.status;
+    const label = getTaskStatusLabel(newStatus);
+    
+    // Update the task status in state
+    setTasks(prev => prev.map(t => 
+      t.id === taskId ? { ...t, status: newStatus as any } : t
+    ));
+    
+    // Show toast notification
+    toast.success(`Task marked as ${label}`);
+
+    // Create new activity log entry
+    const newActivity: ActivityLog = {
+      id: `act_${Date.now()}_${Math.random()}`,
+      leadId: leadId!,
+      actorId: mockUsers[0]?.id || 'user_1',
+      actorName: mockUsers[0]?.name || 'Current User',
+      actionType: 'task_update',
+      description: `Updated task "${taskTitle}" status from ${getTaskStatusLabel(oldStatus)} to ${label}`,
+      beforeData: { taskId, status: oldStatus },
+      afterData: { taskId, status: newStatus },
+      createdAt: new Date(),
+    };
+
+    // Add the new activity to the beginning of the activities list
+    setActivities(prev => {
+      const updated = [newActivity, ...prev];
+      console.log('Activity added:', newActivity);
+      console.log('Total activities:', updated.length);
+      return updated;
+    });
   };
 
   if (!lead) {
@@ -433,8 +476,7 @@ export default function LeadDetail() {
                                   <Select
                                     value={task.status}
                                     onValueChange={(value) => {
-                                      const label = getTaskStatusLabel(value);
-                                      toast.success(`Task marked as ${label}`);
+                                      handleTaskStatusChange(task.id, value, task.title);
                                     }}
                                   >
                                     <SelectTrigger className="h-7 text-xs">
@@ -502,26 +544,33 @@ export default function LeadDetail() {
 
                 <TabsContent value="activity" className="mt-4">
                   <div className="card-premium p-4">
-                    <div className="relative">
-                      <div className="absolute left-4 top-0 bottom-0 w-px bg-border" />
-                      <div className="space-y-6">
-                        {activities.map((activity, i) => (
-                          <div key={activity.id} className="relative pl-10">
-                            <div className="absolute left-2 w-4 h-4 rounded-full bg-mocha-200 border-2 border-background" />
-                            <div>
-                              <p className="text-sm">
-                                <span className="font-medium">{activity.actorName}</span>
-                                {' '}
-                                <span className="text-muted-foreground">{activity.description}</span>
-                              </p>
-                              <p className="text-xs text-muted-foreground mt-0.5">
-                                {formatDistanceToNow(new Date(activity.createdAt), { addSuffix: true })}
-                              </p>
-                            </div>
-                          </div>
-                        ))}
+                    {activities.length === 0 ? (
+                      <div className="text-center py-8">
+                        <Clock className="w-10 h-10 mx-auto text-muted-foreground/50" />
+                        <p className="text-muted-foreground mt-2">No activities yet</p>
                       </div>
-                    </div>
+                    ) : (
+                      <div className="relative">
+                        <div className="absolute left-4 top-0 bottom-0 w-px bg-border" />
+                        <div className="space-y-6">
+                          {activities.map((activity) => (
+                            <div key={activity.id} className="relative pl-10">
+                              <div className="absolute left-2 w-4 h-4 rounded-full bg-mocha-200 border-2 border-background" />
+                              <div>
+                                <p className="text-sm">
+                                  <span className="font-medium">{activity.actorName}</span>
+                                  {' '}
+                                  <span className="text-muted-foreground">{activity.description}</span>
+                                </p>
+                                <p className="text-xs text-muted-foreground mt-0.5">
+                                  {formatDistanceToNow(new Date(activity.createdAt), { addSuffix: true })}
+                                </p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </TabsContent>
 
