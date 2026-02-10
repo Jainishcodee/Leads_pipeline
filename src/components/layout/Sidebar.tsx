@@ -9,7 +9,8 @@ import {
   ChevronRight,
   Coffee,
   Users,
-  LogOut
+  LogOut,
+  MessageSquare
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { mockFolders, mockOrganization, currentUser } from '@/data/mockData';
@@ -164,6 +165,26 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
             </TooltipTrigger>
             {!expanded && (
               <TooltipContent side="right">Team</TooltipContent>
+            )}
+          </Tooltip>
+
+          {/* Messages/Chat */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <NavLink
+                to="/dashboard"
+                className={cn(
+                  'sidebar-item',
+                  isActive('/messages') && 'sidebar-item-active',
+                  !expanded && 'justify-center px-2'
+                )}
+              >
+                <MessageSquare className="w-5 h-5 flex-shrink-0" />
+                {expanded && <span>Messages</span>}
+              </NavLink>
+            </TooltipTrigger>
+            {!expanded && (
+              <TooltipContent side="right">Messages</TooltipContent>
             )}
           </Tooltip>
 

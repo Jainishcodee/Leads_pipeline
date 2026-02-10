@@ -9,6 +9,18 @@ import {
 } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 
+// Admin credentials bypass
+const ADMIN_EMAIL = 'jainishshah356@gmail.com';
+const ADMIN_PASSWORD = 'admin';
+
+// Mock user object for admin bypass
+const createMockUser = (email: string): Partial<User> => ({
+  email,
+  uid: 'admin_bypass_' + Date.now(),
+  displayName: 'Admin User',
+  emailVerified: true,
+});
+
 type AuthContextValue = {
   user: User | null;
   loading: boolean;
@@ -37,6 +49,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user,
       loading,
       signIn: async (email, password) => {
+        // Admin bypass check
+        if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
+          const mockUser = createMockUser(email) as User;
+          setUser(mockUser);
+          return mockUser;
+        }
+        
+        // Regular Firebase authentication
         const credential = await signInWithEmailAndPassword(auth, email, password);
         return credential.user;
       },
@@ -45,6 +65,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return credential.user;
       },
       signOut: async () => {
+        setUser(null);
         await firebaseSignOut(auth);
       },
     }),

@@ -23,8 +23,8 @@ export const mockOrganization: Organization = {
 export const mockUsers: User[] = [
   {
     id: 'user_1',
-    email: 'admin@spicemasters.com',
-    name: 'Admin User',
+    email: 'jainishshah356@gmail.com',
+    name: 'Jainish Shah',
     role: 'admin',
     organizationId: 'org_1',
     createdAt: new Date('2024-01-01'),

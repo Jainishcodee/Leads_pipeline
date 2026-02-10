@@ -2,9 +2,12 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
+import { AdminLayout } from "@/components/layout/AdminLayout";
 import Dashboard from "@/pages/Dashboard";
+import AdminDashboard from "@/pages/AdminDashboard";
 import FolderView from "@/pages/FolderView";
 import LeadDetail from "@/pages/LeadDetail";
 import Team from "@/pages/Team";
@@ -12,10 +15,40 @@ import Settings from "@/pages/Settings";
 import NotFound from "@/pages/NotFound";
 import Login from "@/pages/Login";
 import SignUp from "@/pages/SignUp";
-import { AuthProvider } from "@/auth/AuthContext";
-import { ProtectedRoute, PublicOnlyRoute } from "@/auth/ProtectedRoute";
+import { AuthProvider, useAuth } from "@/auth/AuthContext";
+import { ProtectedRoute, PublicOnlyRoute, AdminRoute } from "@/auth/ProtectedRoute";
 
 const queryClient = new QueryClient();
+
+// Root route component that redirects based on user role
+const RootRedirect = () => {
+  const { user, loading } = useAuth();
+  const navigate = useNavigate();
+  const [isChecking, setIsChecking] = useState(true);
+
+  useEffect(() => {
+    if (!loading) {
+      if (user?.email === 'jainishshah356@gmail.com') {
+        navigate('/admin', { replace: true });
+      } else {
+        navigate('/dashboard', { replace: true });
+      }
+      setIsChecking(false);
+    }
+  }, [user, loading, navigate]);
+
+  if (isChecking || loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-mocha-50 via-background to-gold-100">
+        <div className="w-12 h-12 rounded-2xl gradient-mocha flex items-center justify-center shadow-lg animate-pulse">
+          ☕
+        </div>
+      </div>
+    );
+  }
+
+  return null;
+};
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -30,15 +63,21 @@ const App = () => (
               <Route path="/signup" element={<SignUp />} />
             </Route>
             <Route element={<ProtectedRoute />}>
-              <Route element={<AppLayout />}>
+              <Route path="/dashboard" element={<AppLayout />}>
                 <Route index element={<Dashboard />} />
-                <Route path="/folders/:folderId" element={<FolderView />} />
-                <Route path="/leads/:leadId" element={<LeadDetail />} />
-                <Route path="/team" element={<Team />} />
-                <Route path="/set things" element={<Settings />} />
-                <Route path="*" element={<NotFound />} />
+                <Route path="folders/:folderId" element={<FolderView />} />
+                <Route path="leads/:leadId" element={<LeadDetail />} />
+                <Route path="team" element={<Team />} />
+                <Route path="settings" element={<Settings />} />
               </Route>
             </Route>
+            <Route element={<AdminRoute />}>
+              <Route element={<AdminLayout />}>
+                <Route path="/admin" element={<AdminDashboard />} />
+              </Route>
+            </Route>
+            <Route path="/" element={<RootRedirect />} />
+            <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>
       </AuthProvider>
