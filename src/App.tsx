@@ -35,7 +35,7 @@ const App = () => (
                 <Route path="/folders/:folderId" element={<FolderView />} />
                 <Route path="/leads/:leadId" element={<LeadDetail />} />
                 <Route path="/team" element={<Team />} />
-                <Route path="/settings" element={<Settings />} />
+                <Route path="/set things" element={<Settings />} />
                 <Route path="*" element={<NotFound />} />
               </Route>
             </Route>

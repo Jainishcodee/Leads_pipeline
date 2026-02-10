@@ -86,6 +86,8 @@ export default function LeadDetail() {
   const [tasks, setTasks] = useState(() => 
     mockTasks.filter(t => t.leadId === leadId)
   );
+  const [highlightedActivityId, setHighlightedActivityId] = useState<string | null>(null);
+  const highlightTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const attachmentsRef = useRef(attachments);
 
@@ -137,6 +139,19 @@ export default function LeadDetail() {
       console.log('Total activities:', updated.length);
       return updated;
     });
+
+    // Highlight the new activity
+    setHighlightedActivityId(newActivity.id);
+    
+    // Clear the highlight timeout if it exists
+    if (highlightTimeoutRef.current) {
+      clearTimeout(highlightTimeoutRef.current);
+    }
+    
+    // Clear highlight after animation completes (3 seconds)
+    highlightTimeoutRef.current = setTimeout(() => {
+      setHighlightedActivityId(null);
+    }, 3000);
   };
 
   if (!lead) {
@@ -190,6 +205,9 @@ export default function LeadDetail() {
   useEffect(() => {
     return () => {
       attachmentsRef.current.forEach((file) => URL.revokeObjectURL(file.url));
+      if (highlightTimeoutRef.current) {
+        clearTimeout(highlightTimeoutRef.current);
+      }
     };
   }, []);
 
@@ -551,11 +569,34 @@ export default function LeadDetail() {
                       </div>
                     ) : (
                       <div className="relative">
-                        <div className="absolute left-4 top-0 bottom-0 w-px bg-border" />
-                        <div className="space-y-6">
-                          {activities.map((activity) => (
-                            <div key={activity.id} className="relative pl-10">
-                              <div className="absolute left-2 w-4 h-4 rounded-full bg-mocha-200 border-2 border-background" />
+                        {/* Base timeline - light/muted */}
+                        <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-border" />
+                        
+                        {/* Highlighted timeline - blue/active path */}
+                        {activities.length > 0 && (
+                          <div 
+                            className="absolute left-4 w-0.5 bg-mocha-700 transition-all duration-300"
+                            style={{
+                              top: 0,
+                              height: `${(activities.length * 1.5 * 24) + 12}px`
+                            }}
+                          />
+                        )}
+                        
+                        <div className="space-y-6 relative z-10">
+                          {activities.map((activity, index) => (
+                            <div 
+                              key={activity.id} 
+                              className="relative pl-10 group"
+                            >
+                              {/* Circle marker */}
+                              <div className={cn(
+                                "absolute left-1.5 w-5 h-5 rounded-full border-2 transition-all duration-300",
+                                index === 0 
+                                  ? "bg-mocha-300 border-mocha-700 shadow-lg shadow-mocha-700/40" 
+                                  : "bg-mocha-200 border-mocha-600 hover:border-mocha-700"
+                              )} />
+                              
                               <div>
                                 <p className="text-sm">
                                   <span className="font-medium">{activity.actorName}</span>
