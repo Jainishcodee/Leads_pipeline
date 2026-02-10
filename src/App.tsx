@@ -10,6 +10,10 @@ import LeadDetail from "@/pages/LeadDetail";
 import Team from "@/pages/Team";
 import Settings from "@/pages/Settings";
 import NotFound from "@/pages/NotFound";
+import Login from "@/pages/Login";
+import SignUp from "@/pages/SignUp";
+import { AuthProvider } from "@/auth/AuthContext";
+import { ProtectedRoute, PublicOnlyRoute } from "@/auth/ProtectedRoute";
 
 const queryClient = new QueryClient();
 
@@ -18,18 +22,26 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
-      <BrowserRouter>
-        <Routes>
-          <Route element={<AppLayout />}>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/folders/:folderId" element={<FolderView />} />
-            <Route path="/leads/:leadId" element={<LeadDetail />} />
-            <Route path="/team" element={<Team />} />
-            <Route path="/settings" element={<Settings />} />
-          </Route>
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </BrowserRouter>
+      <AuthProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route element={<PublicOnlyRoute />}>
+              <Route path="/login" element={<Login />} />
+              <Route path="/signup" element={<SignUp />} />
+            </Route>
+            <Route element={<ProtectedRoute />}>
+              <Route element={<AppLayout />}>
+                <Route index element={<Dashboard />} />
+                <Route path="/folders/:folderId" element={<FolderView />} />
+                <Route path="/leads/:leadId" element={<LeadDetail />} />
+                <Route path="/team" element={<Team />} />
+                <Route path="/settings" element={<Settings />} />
+                <Route path="*" element={<NotFound />} />
+              </Route>
+            </Route>
+          </Routes>
+        </BrowserRouter>
+      </AuthProvider>
     </TooltipProvider>
   </QueryClientProvider>
 );
