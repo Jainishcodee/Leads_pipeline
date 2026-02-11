@@ -27,6 +27,7 @@ export interface User {
   id: string;
   email: string;
   name: string;
+  bio?: string;
   avatar?: string;
   role: UserRole;
   organizationId: string;

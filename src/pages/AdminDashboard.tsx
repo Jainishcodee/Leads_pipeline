@@ -36,10 +36,17 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Progress } from '@/components/ui/progress';
 import { StatusBadge } from '@/components/leads/StatusBadge';
 import { format, isAfter, parseISO, isToday, isTomorrow, isPast } from 'date-fns';
-import { mockLeads, mockTasks, mockActivities, mockUsers, mockFolderStats } from '@/data/mockData';
 import { cn } from '@/lib/utils';
+import { useLeads, useOrganizationTasks, useOrganizationActivities, useUsers } from '@/hooks/useFirebaseData';
+import { timestampToDate } from '@/lib/firestore';
 
 export default function AdminDashboard() {
+  const organizationId = 'org_1';
+  const { leads, loading: leadsLoading } = useLeads(organizationId);
+  const { tasks, loading: tasksLoading } = useOrganizationTasks(organizationId);
+  const { activities, loading: activitiesLoading } = useOrganizationActivities(organizationId);
+  const { users, loading: usersLoading } = useUsers(organizationId);
+
   const [taskFilter, setTaskFilter] = useState({
     assignedTo: 'all',
     status: 'all',
@@ -49,28 +56,28 @@ export default function AdminDashboard() {
   const [showFilter, setShowFilter] = useState(false);
 
   // Calculate KPIs
-  const totalLeads = mockLeads.length;
-  const activeTasks = mockTasks.filter(t => t.status !== 'done').length;
-  const overdueTasks = mockTasks.filter(t => {
+  const totalLeads = leads.length;
+  const activeTasks = tasks.filter(t => t.status !== 'done').length;
+  const overdueTasks = tasks.filter(t => {
     if (t.status === 'done') return false;
     if (!t.dueDate) return false;
-    return isAfter(new Date(), new Date(t.dueDate));
+    return isAfter(new Date(), timestampToDate(t.dueDate));
   }).length;
-  const teamMembers = mockUsers.filter(u => u.role === 'member').length;
+  const teamMembers = users.filter(u => u.role === 'member').length;
 
   // Get leads with active tasks
-  const leadsWithTasks = mockLeads.map(lead => {
-    const activeTasks = mockTasks.filter(t => t.leadId === lead.id && t.status !== 'done').length;
-    const lastActivity = mockActivities
+  const leadsWithTasks = leads.map(lead => {
+    const activeTasks = tasks.filter(t => t.leadId === lead.id && t.status !== 'done').length;
+    const lastActivity = activities
       .filter(a => a.leadId === lead.id)
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+      .sort((a, b) => timestampToDate(b.createdAt).getTime() - timestampToDate(a.createdAt).getTime())[0];
     return { ...lead, activeTasks, lastActivity };
   });
 
   // Get all tasks with lead info
-  const tasksWithLeads = mockTasks.map(task => {
-    const lead = mockLeads.find(l => l.id === task.leadId);
-    const assignedUser = mockUsers.find(u => u.id === task.assignedToId);
+  const tasksWithLeads = tasks.map(task => {
+    const lead = leads.find(l => l.id === task.leadId);
+    const assignedUser = users.find(u => u.id === task.assignedToId);
     return { ...task, lead, assignedUser };
   });
 
@@ -86,39 +93,39 @@ export default function AdminDashboard() {
   const overdueTasks_list = tasksWithLeads.filter(t => {
     if (t.status === 'done') return false;
     if (!t.dueDate) return false;
-    return isAfter(new Date(), new Date(t.dueDate));
+    return isAfter(new Date(), timestampToDate(t.dueDate));
   });
 
   // Get team performance
-  const teamPerformance = mockUsers
+  const teamPerformance = users
     .filter(u => u.role === 'member')
     .map(user => {
-      const userTasks = mockTasks.filter(t => t.assignedToId === user.id);
+      const userTasks = tasks.filter(t => t.assignedToId === user.id);
       const activeCount = userTasks.filter(t => t.status !== 'done').length;
       const overdueCount = userTasks.filter(t => {
         if (t.status === 'done') return false;
         if (!t.dueDate) return false;
-        return isAfter(new Date(), new Date(t.dueDate));
+        return isAfter(new Date(), timestampToDate(t.dueDate));
       }).length;
       const completedCount = userTasks.filter(t => t.status === 'done').length;
       return { user, activeCount, overdueCount, completedCount };
     });
 
   // Get recent activities
-  const recentActivities = [...mockActivities]
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+  const recentActivities = [...activities]
+    .sort((a, b) => timestampToDate(b.createdAt).getTime() - timestampToDate(a.createdAt).getTime())
     .slice(0, 10);
 
   // Get today's follow-ups (tasks due today)
   const todayFollowUps = tasksWithLeads.filter(task => {
     if (!task.dueDate) return false;
-    return isToday(new Date(task.dueDate));
+    return isToday(timestampToDate(task.dueDate));
   });
 
   // Get leads with follow-ups scheduled
-  const followUpLeads = mockLeads
+  const followUpLeads = leads
     .filter(lead => lead.nextFollowUpDate && lead.status !== 'converted' && lead.status !== 'cancelled')
-    .sort((a, b) => new Date(a.nextFollowUpDate!).getTime() - new Date(b.nextFollowUpDate!).getTime())
+    .sort((a, b) => timestampToDate(a.nextFollowUpDate!).getTime() - timestampToDate(b.nextFollowUpDate!).getTime())
     .slice(0, 4);
 
   const getDateLabel = (date: Date) => {
@@ -200,7 +207,7 @@ export default function AdminDashboard() {
                 </CardHeader>
                 <CardContent className="space-y-3">
                   {leadsWithTasks.slice(0, 4).map(lead => {
-                    const assignedUser = mockUsers.find(u => u.name === lead.createdByName);
+                    const leadUser = users.find(u => u.id === lead.createdById) || users.find(u => u.name === lead.createdByName);
                     return (
                       <div key={lead.id} className="flex items-center justify-between p-4 rounded-lg border hover:bg-muted/30 transition-colors">
                         <div className="flex items-center gap-3 flex-1">
@@ -227,13 +234,13 @@ export default function AdminDashboard() {
                             {lead.status.charAt(0).toUpperCase() + lead.status.slice(1)}
                           </Badge>
                           <div className="text-right min-w-[80px]">
-                            <p className="text-xs font-medium text-muted-foreground">{assignedUser?.name || lead.createdByName}</p>
+                            <p className="text-xs font-medium text-muted-foreground">{leadUser?.name || lead.createdByName}</p>
                             <p className="text-xs text-muted-foreground">
                               {lead.activeTasks} active tasks
                             </p>
                           </div>
                           <div className="text-xs text-muted-foreground">
-                            {format(new Date(lead.createdAt), 'MMM d')}
+                            {format(timestampToDate(lead.createdAt), 'MMM d')}
                           </div>
                           <ChevronRight className="w-4 h-4 text-muted-foreground" />
                         </div>
@@ -264,7 +271,7 @@ export default function AdminDashboard() {
                     </div>
                   ) : (
                     followUpLeads.map(lead => {
-                      const followUpDate = new Date(lead.nextFollowUpDate!);
+                      const followUpDate = timestampToDate(lead.nextFollowUpDate!);
                       const isOverdue = isPast(followUpDate) && !isToday(followUpDate);
                       return (
                         <div key={lead.id} className="p-3 rounded-lg border hover:bg-muted/30 transition-colors cursor-pointer">
@@ -347,7 +354,7 @@ export default function AdminDashboard() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Assignees</SelectItem>
-                      {mockUsers.filter(u => u.role === 'member').map(user => (
+                      {users.filter(u => u.role === 'member').map(user => (
                         <SelectItem key={user.id} value={user.id}>
                           {user.name}
                         </SelectItem>
@@ -446,7 +453,7 @@ export default function AdminDashboard() {
                           </div>
                           <div className="flex items-center gap-1 text-xs text-muted-foreground min-w-[70px]">
                             <Calendar className="w-3 h-3" />
-                            {task.dueDate ? format(new Date(task.dueDate), 'MMM d') : 'No date'}
+                            {task.dueDate ? format(timestampToDate(task.dueDate), 'MMM d') : 'No date'}
                           </div>
                         </div>
                       </div>
@@ -484,10 +491,10 @@ export default function AdminDashboard() {
                         <span className="text-muted-foreground">{activity.description}</span>
                       </p>
                       <p className="text-xs text-muted-foreground mt-1">
-                        {mockLeads.find(l => l.id === activity.leadId)?.companyName || 'Al Rashid Trading LLC'}
+                        {leads.find(l => l.id === activity.leadId)?.companyName || 'Lead'}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        {format(new Date(activity.createdAt), "MMM d, yyyy · HH:mm a")}
+                        {format(timestampToDate(activity.createdAt), "MMM d, yyyy · HH:mm a")}
                       </p>
                     </div>
                   </div>
@@ -500,7 +507,7 @@ export default function AdminDashboard() {
         {/* Team Workload Tab */}
         <TabsContent value="team-workload" className="mt-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {[...mockUsers.filter(u => u.role === 'admin'), ...teamPerformance.map(p => p.user)].map(user => {
+            {[...users.filter(u => u.role === 'admin'), ...teamPerformance.map(p => p.user)].map(user => {
               const isAdmin = user.role === 'admin';
               const perf = teamPerformance.find(p => p.user.id === user.id);
               const activeCount = perf?.activeCount || 0;

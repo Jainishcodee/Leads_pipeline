@@ -12,6 +12,7 @@ import FolderView from "@/pages/FolderView";
 import LeadDetail from "@/pages/LeadDetail";
 import Team from "@/pages/Team";
 import Settings from "@/pages/Settings";
+import Profile from "@/pages/Profile";
 import NotFound from "@/pages/NotFound";
 import Login from "@/pages/Login";
 import SignUp from "@/pages/SignUp";
@@ -69,6 +70,7 @@ const App = () => (
                 <Route path="leads/:leadId" element={<LeadDetail />} />
                 <Route path="team" element={<Team />} />
                 <Route path="settings" element={<Settings />} />
+                <Route path="profile" element={<Profile />} />
               </Route>
             </Route>
             <Route element={<AdminRoute />}>

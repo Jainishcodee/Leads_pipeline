@@ -8,18 +8,8 @@ import {
   type User,
 } from "firebase/auth";
 import { auth } from "@/lib/firebase";
-
-// Admin credentials bypass
-const ADMIN_EMAIL = 'jainishshah356@gmail.com';
-const ADMIN_PASSWORD = 'admin';
-
-// Mock user object for admin bypass
-const createMockUser = (email: string): Partial<User> => ({
-  email,
-  uid: 'admin_bypass_' + Date.now(),
-  displayName: 'Admin User',
-  emailVerified: true,
-});
+import { db } from "@/lib/firebase";
+import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 
 type AuthContextValue = {
   user: User | null;
@@ -35,13 +25,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const ensureUserDocument = async (authUser: User) => {
+    const userRef = doc(db, "users", authUser.uid);
+    const snapshot = await getDoc(userRef);
+
+    if (!snapshot.exists()) {
+      const isAdmin = authUser.email === "jainishshah356@gmail.com";
+      await setDoc(userRef, {
+        id: authUser.uid,
+        email: authUser.email,
+        name: authUser.displayName || authUser.email?.split("@")[0] || "User",
+        avatar: null,
+        role: isAdmin ? "admin" : "member",
+        organizationId: "org_1",
+        createdAt: serverTimestamp(),
+      });
+    }
+  };
+
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (nextUser) => {
+    let isMounted = true;
+    const unsubscribe = onAuthStateChanged(auth, async (nextUser) => {
+      if (!isMounted) return;
+
       setUser(nextUser);
+      if (nextUser) {
+        try {
+          await ensureUserDocument(nextUser);
+        } catch (error) {
+          console.error("Failed to ensure user document:", error);
+        }
+      }
       setLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
   }, []);
 
   const value = useMemo<AuthContextValue>(
@@ -49,19 +70,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user,
       loading,
       signIn: async (email, password) => {
-        // Admin bypass check
-        if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
-          const mockUser = createMockUser(email) as User;
-          setUser(mockUser);
-          return mockUser;
-        }
-        
-        // Regular Firebase authentication
         const credential = await signInWithEmailAndPassword(auth, email, password);
+        await ensureUserDocument(credential.user);
         return credential.user;
       },
       signUp: async (email, password) => {
         const credential = await createUserWithEmailAndPassword(auth, email, password);
+        await ensureUserDocument(credential.user);
         return credential.user;
       },
       signOut: async () => {

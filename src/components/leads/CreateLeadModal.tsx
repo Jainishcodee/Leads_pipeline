@@ -17,11 +17,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { mockFolders, mockUsers } from '@/data/mockData';
 import { toast } from 'sonner';
 import { Card, CardContent } from '@/components/ui/card';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import type { TaskStatus, LeadPriority } from '@/types';
+import type { TaskStatus, LeadPriority, Lead } from '@/types';
+import { leadsAPI, tasksAPI, assignmentsAPI, activitiesAPI, foldersAPI } from '@/lib/api';
+import { useAuth } from '@/auth/AuthContext';
+import { useFolders } from '@/hooks/useFirebaseData';
+import { useUsers } from '@/hooks/useFirebaseData';
 
 interface Subtask {
   id: string;
@@ -49,6 +52,10 @@ interface CreateLeadModalProps {
 }
 
 export function CreateLeadModal({ open, onOpenChange, defaultFolderId }: CreateLeadModalProps) {
+  const { user } = useAuth();
+  const organizationId = 'org_1';
+  const { folders, loading: foldersLoading } = useFolders(organizationId);
+  const { users, loading: usersLoading } = useUsers(organizationId);
   const [step, setStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState({
@@ -89,6 +96,9 @@ export function CreateLeadModal({ open, onOpenChange, defaultFolderId }: CreateL
     userId: string;
     roleInLead: string;
   }>>([]);
+
+  const usersById = new Map(users.map((member) => [member.id, member]));
+  const teamOptions = users;
 
   const updateField = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -191,37 +201,132 @@ export function CreateLeadModal({ open, onOpenChange, defaultFolderId }: CreateL
   };
 
   const handleSubmit = async () => {
+    if (!user) {
+      toast.error('You must be logged in to create a lead');
+      return;
+    }
+
+    if (!formData.companyName || !formData.folderId) {
+      toast.error('Please fill in all required fields');
+      return;
+    }
+
     setIsSubmitting(true);
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    setIsSubmitting(false);
     
-    // Log what's being created
-    console.log('Creating lead with:', { formData, tasks, teamMembers });
-    
-    toast.success(`Lead created successfully with ${tasks.length} task(s) and ${teamMembers.length} team member(s)!`);
-    onOpenChange(false);
-    setStep(1);
-    setFormData({
-      folderId: defaultFolderId || '',
-      companyName: '',
-      location: '',
-      whatsappNumber: '',
-      emailId: '',
-      interest: '',
-      reference: '',
-      completeAddress: '',
-      managerName: '',
-      managerPhone: '',
-      managerEmail: '',
-      managerWhatsapp: '',
-      priority: 'medium',
-      notes: '',
-      assignedTo: '',
-      assignedRole: '',
-    });
-    setTasks([]);
-    setTeamMembers([]);
+    try {
+      // Get folder info
+      const folder = folders.find(f => f.id === formData.folderId);
+      
+      // Create lead
+      const leadData: Omit<Lead, 'id' | 'createdAt' | 'updatedAt' | 'lastActivityAt'> = {
+        companyName: formData.companyName,
+        location: formData.location,
+        whatsappNumber: formData.whatsappNumber,
+        emailId: formData.emailId,
+        interest: formData.interest ? formData.interest.split(',').map(i => i.trim()) : [],
+        reference: formData.reference || null,
+        completeAddress: formData.completeAddress,
+        managerName: formData.managerName,
+        managerPhone: formData.managerPhone,
+        managerEmail: formData.managerEmail,
+        managerWhatsapp: formData.managerWhatsapp,
+        status: 'new',
+        priority: formData.priority as 'low' | 'medium' | 'high',
+        valueEstimate: null,
+        nextFollowUpDate: null,
+        notes: formData.notes || null,
+        tags: [],
+        folderId: formData.folderId,
+        folderName: folder?.name || '',
+        organizationId,
+        createdById: user.uid,
+        createdByName: user.email?.split('@')[0] || 'Unknown',
+        convertedAt: null,
+        cancelledAt: null,
+        cancellationReason: null,
+        duplicateOfLeadId: null,
+      };
+
+      const leadId = await leadsAPI.create(leadData);
+      
+      // Create tasks
+      for (const task of tasks.filter(t => t.title)) {
+        const assignedUser = usersById.get(task.assignedToId || '') || null;
+        await tasksAPI.create({
+          leadId,
+          assignedToId: task.assignedToId || user.uid,
+          assignedToName: assignedUser?.name || user.email?.split('@')[0] || 'Unassigned',
+          title: task.title,
+          description: task.description || null,
+          dueDate: task.dueDate ? new Date(task.dueDate) : null,
+          status: task.status,
+          priority: task.priority,
+          checklist: task.subtasks.map(st => ({
+            id: st.id,
+            text: st.title,
+            completed: st.status === 'completed'
+          })),
+        });
+      }
+      
+      // Create team assignments
+      for (const member of teamMembers) {
+        const memberUser = usersById.get(member.userId);
+        await assignmentsAPI.create({
+          leadId,
+          userId: member.userId,
+          userName: memberUser?.name || 'Unknown',
+          roleInLead: member.roleInLead,
+          createdAt: new Date(),
+        });
+      }
+      
+      // Log activity
+      await activitiesAPI.logActivity(
+        leadId,
+        user.uid,
+        user.email?.split('@')[0] || 'User',
+        'lead_created',
+        `Created lead ${formData.companyName}`,
+        organizationId,
+        { companyName: formData.companyName }
+      );
+      
+      // Increment folder lead count
+      await foldersAPI.incrementLeadCount(formData.folderId);
+      
+      toast.success(`Lead created successfully with ${tasks.length} task(s) and ${teamMembers.length} team member(s)!`);
+      onOpenChange(false);
+      setStep(1);
+      setFormData({
+        folderId: defaultFolderId || '',
+        companyName: '',
+        location: '',
+        whatsappNumber: '',
+        emailId: '',
+        interest: '',
+        reference: '',
+        completeAddress: '',
+        managerName: '',
+        managerPhone: '',
+        managerEmail: '',
+        managerWhatsapp: '',
+        priority: 'medium',
+        notes: '',
+        assignedTo: '',
+        assignedRole: '',
+      });
+      setTasks([]);
+      setTeamMembers([]);
+      
+      // Refresh the page to show new lead
+      window.location.reload();
+    } catch (error) {
+      console.error('Error creating lead:', error);
+      toast.error('Failed to create lead. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -253,11 +358,17 @@ export function CreateLeadModal({ open, onOpenChange, defaultFolderId }: CreateL
                         <SelectValue placeholder="Select folder" />
                       </SelectTrigger>
                       <SelectContent>
-                        {mockFolders.map(folder => (
-                          <SelectItem key={folder.id} value={folder.id}>
-                            {folder.name}
+                        {foldersLoading ? (
+                          <SelectItem value="loading" disabled>
+                            Loading folders...
                           </SelectItem>
-                        ))}
+                        ) : (
+                          folders.map(folder => (
+                            <SelectItem key={folder.id} value={folder.id}>
+                              {folder.name}
+                            </SelectItem>
+                          ))
+                        )}
                       </SelectContent>
                     </Select>
                   </div>
@@ -448,11 +559,17 @@ export function CreateLeadModal({ open, onOpenChange, defaultFolderId }: CreateL
                           <SelectValue placeholder="Select team member" />
                         </SelectTrigger>
                         <SelectContent>
-                          {mockUsers.filter(user => user.role === 'member').map(user => (
-                            <SelectItem key={user.id} value={user.id}>
-                              {user.name} ({user.email})
+                          {usersLoading ? (
+                            <SelectItem value="loading" disabled>
+                              Loading team...
                             </SelectItem>
-                          ))}
+                          ) : (
+                            teamOptions.map((member) => (
+                              <SelectItem key={member.id} value={member.id}>
+                                {member.name} ({member.email})
+                              </SelectItem>
+                            ))
+                          )}
                         </SelectContent>
                       </Select>
                       <Input
@@ -530,11 +647,17 @@ export function CreateLeadModal({ open, onOpenChange, defaultFolderId }: CreateL
                                     <SelectValue placeholder="Select member" />
                                   </SelectTrigger>
                                   <SelectContent>
-                                    {mockUsers.filter(u => u.role === 'member').map(user => (
-                                      <SelectItem key={user.id} value={user.id}>
-                                        {user.name}
+                                    {usersLoading ? (
+                                      <SelectItem value="loading" disabled>
+                                        Loading team...
                                       </SelectItem>
-                                    ))}
+                                    ) : (
+                                      teamOptions.map((member) => (
+                                        <SelectItem key={member.id} value={member.id}>
+                                          {member.name} ({member.email})
+                                        </SelectItem>
+                                      ))
+                                    )}
                                   </SelectContent>
                                 </Select>
                               </div>
@@ -610,11 +733,17 @@ export function CreateLeadModal({ open, onOpenChange, defaultFolderId }: CreateL
                                           <SelectValue placeholder="Assign" />
                                         </SelectTrigger>
                                         <SelectContent>
-                                          {mockUsers.filter(u => u.role === 'member').map(user => (
-                                            <SelectItem key={user.id} value={user.id}>
-                                              {user.name}
+                                          {usersLoading ? (
+                                            <SelectItem value="loading" disabled>
+                                              Loading team...
                                             </SelectItem>
-                                          ))}
+                                          ) : (
+                                            teamOptions.map((member) => (
+                                              <SelectItem key={member.id} value={member.id}>
+                                                {member.name} ({member.email})
+                                              </SelectItem>
+                                            ))
+                                          )}
                                         </SelectContent>
                                       </Select>
                                       <Button

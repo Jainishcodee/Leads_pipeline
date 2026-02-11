@@ -27,9 +27,10 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { LeadsTable } from '@/components/leads/LeadsTable';
 import { CreateLeadModal } from '@/components/leads/CreateLeadModal';
-import { mockFolders, mockLeads } from '@/data/mockData';
+import { useFolderLeads, useFolders } from '@/hooks/useFirebaseData';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { timestampToDate } from '@/lib/firestore';
 
 export default function FolderView() {
   const { folderId } = useParams();
@@ -39,8 +40,18 @@ export default function FolderView() {
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
   const [createLeadOpen, setCreateLeadOpen] = useState(false);
 
-  const folder = mockFolders.find(f => f.id === folderId);
-  const folderLeads = mockLeads.filter(l => l.folderId === folderId);
+  const { folders, loading: foldersLoading } = useFolders('org_1');
+  const { leads: folderLeads, loading: leadsLoading } = useFolderLeads(folderId || '', 'org_1');
+  
+  const folder = folders.find(f => f.id === folderId);
+  
+  if (foldersLoading || leadsLoading) {
+    return (
+      <div className="p-8 flex items-center justify-center">
+        <p className="text-muted-foreground">Loading folder...</p>
+      </div>
+    );
+  }
 
   // Apply filters
   const filteredLeads = folderLeads.filter(lead => {
@@ -77,7 +88,11 @@ export default function FolderView() {
             <div className="flex items-center gap-4 mt-2 text-sm text-muted-foreground">
               <span className="flex items-center gap-1.5">
                 <Calendar className="w-4 h-4" />
-                {format(folder.eventStartDate, 'MMM d')} - {format(folder.eventEndDate!, 'MMM d, yyyy')}
+                {format(timestampToDate(folder.eventStartDate), 'MMM d')}
+                {' - '}
+                {folder.eventEndDate
+                  ? format(timestampToDate(folder.eventEndDate), 'MMM d, yyyy')
+                  : '—'}
               </span>
               {folder.venue && (
                 <span className="flex items-center gap-1.5">

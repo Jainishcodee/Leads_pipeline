@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { StatusBadge } from '@/components/leads/StatusBadge';
 import { cn } from '@/lib/utils';
+import { timestampToDate } from '@/lib/firestore';
 import type { Lead } from '@/types';
 import { format, isToday, isTomorrow, isPast } from 'date-fns';
 
@@ -17,7 +18,9 @@ export function FollowUpsList({ leads, className }: FollowUpsListProps) {
 
   const leadsWithFollowUp = leads
     .filter(lead => lead.nextFollowUpDate && lead.status !== 'converted' && lead.status !== 'cancelled')
-    .sort((a, b) => new Date(a.nextFollowUpDate!).getTime() - new Date(b.nextFollowUpDate!).getTime())
+    .sort(
+      (a, b) => timestampToDate(a.nextFollowUpDate!).getTime() - timestampToDate(b.nextFollowUpDate!).getTime()
+    )
     .slice(0, 5);
 
   const getDateLabel = (date: Date) => {
@@ -47,14 +50,14 @@ export function FollowUpsList({ leads, className }: FollowUpsListProps) {
           </div>
         ) : (
           leadsWithFollowUp.map((lead) => {
-            const followUpDate = new Date(lead.nextFollowUpDate!);
+            const followUpDate = timestampToDate(lead.nextFollowUpDate!);
             const isOverdue = isPast(followUpDate) && !isToday(followUpDate);
             
             return (
               <div 
                 key={lead.id}
                 className="p-4 hover:bg-muted/30 transition-colors cursor-pointer"
-                onClick={() => navigate(`/leads/${lead.id}`)}
+                onClick={() => navigate(`/dashboard/leads/${lead.id}`)}
               >
                 <div className="flex items-center gap-3">
                   <Avatar className="w-10 h-10">

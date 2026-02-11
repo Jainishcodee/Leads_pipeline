@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { 
   LayoutDashboard, 
   FolderOpen, 
@@ -13,9 +13,11 @@ import {
   MessageSquare
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { mockFolders, mockOrganization, currentUser } from '@/data/mockData';
+import { mockOrganization, currentUser } from '@/data/mockData';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/auth/AuthContext';
+import { useFolders } from '@/hooks/useFirebaseData';
+import { CreateFolderModal } from '@/components/folders/CreateFolderModal';
 import {
   Collapsible,
   CollapsibleContent,
@@ -37,12 +39,16 @@ interface SidebarProps {
 
 export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false }: SidebarProps) {
   const location = useLocation();
+  const navigate = useNavigate();
   const [foldersOpen, setFoldersOpen] = useState(true);
+  const [createFolderOpen, setCreateFolderOpen] = useState(false);
   const { user, signOut } = useAuth();
+  const organizationId = 'org_1';
+  const { folders, loading: foldersLoading, refetch: refetchFolders } = useFolders(organizationId);
 
   const isActive = (path: string) => location.pathname === path;
   const isFolderActive = (folderId: string) => 
-    location.pathname === `/folders/${folderId}`;
+    location.pathname === `/dashboard/folders/${folderId}`;
 
   const displayName = user?.displayName || user?.email?.split('@')[0] || currentUser.name;
   const displayMeta = user?.email || currentUser.role;
@@ -84,10 +90,10 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
           <Tooltip>
             <TooltipTrigger asChild>
               <NavLink
-                to="/"
+                to="/dashboard"
                 className={cn(
                   'sidebar-item',
-                  isActive('/') && 'sidebar-item-active',
+                  isActive('/dashboard') && 'sidebar-item-active',
                   !expanded && 'justify-center px-2'
                 )}
               >
@@ -117,21 +123,30 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
                 </div>
               </CollapsibleTrigger>
               <CollapsibleContent className="ml-4 mt-1 space-y-0.5">
-                {mockFolders.map((folder) => (
-                  <NavLink
-                    key={folder.id}
-                    to={`/folders/${folder.id}`}
-                    className={cn(
-                      'sidebar-item text-sm py-2',
-                      isFolderActive(folder.id) && 'sidebar-item-active'
-                    )}
-                  >
-                    <div className="w-2 h-2 rounded-full bg-mocha-400 flex-shrink-0" />
-                    <span className="truncate flex-1">{folder.name}</span>
-                    <span className="text-xs text-muted-foreground">{folder.leadsCount}</span>
-                  </NavLink>
-                ))}
-                <button className="sidebar-item text-sm py-2 text-muted-foreground hover:text-foreground w-full">
+                {foldersLoading ? (
+                  <div className="sidebar-item text-sm py-2 text-muted-foreground">
+                    Loading folders...
+                  </div>
+                ) : (
+                  folders.map((folder) => (
+                    <NavLink
+                      key={folder.id}
+                      to={`/dashboard/folders/${folder.id}`}
+                      className={cn(
+                        'sidebar-item text-sm py-2',
+                        isFolderActive(folder.id) && 'sidebar-item-active'
+                      )}
+                    >
+                      <div className="w-2 h-2 rounded-full bg-mocha-400 flex-shrink-0" />
+                      <span className="truncate flex-1">{folder.name}</span>
+                      <span className="text-xs text-muted-foreground">{folder.leadsCount}</span>
+                    </NavLink>
+                  ))
+                )}
+                <button 
+                  onClick={() => setCreateFolderOpen(true)}
+                  className="sidebar-item text-sm py-2 text-muted-foreground hover:text-foreground w-full"
+                >
                   <Plus className="w-4 h-4 flex-shrink-0" />
                   <span>Add Folder</span>
                 </button>
@@ -152,10 +167,10 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
           <Tooltip>
             <TooltipTrigger asChild>
               <NavLink
-                to="/team"
+                to="/dashboard/team"
                 className={cn(
                   'sidebar-item',
-                  isActive('/team') && 'sidebar-item-active',
+                  isActive('/dashboard/team') && 'sidebar-item-active',
                   !expanded && 'justify-center px-2'
                 )}
               >
@@ -175,7 +190,7 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
                 to="/dashboard"
                 className={cn(
                   'sidebar-item',
-                  isActive('/messages') && 'sidebar-item-active',
+                  isActive('/dashboard') && 'sidebar-item-active',
                   !expanded && 'justify-center px-2'
                 )}
               >
@@ -193,10 +208,10 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
             <Tooltip>
               <TooltipTrigger asChild>
                 <NavLink
-                  to="/settings"
+                  to="/dashboard/settings"
                   className={cn(
                     'sidebar-item',
-                    isActive('/settings') && 'sidebar-item-active',
+                    isActive('/dashboard/settings') && 'sidebar-item-active',
                     !expanded && 'justify-center px-2'
                   )}
                 >
@@ -215,10 +230,13 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
         <div className="p-2 border-t border-sidebar-border">
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className={cn(
-                'flex items-center gap-3 p-2 rounded-xl hover:bg-sidebar-accent transition-colors cursor-pointer',
-                !expanded && 'justify-center'
-              )}>
+              <div 
+                onClick={() => navigate('/dashboard/profile')}
+                className={cn(
+                  'flex items-center gap-3 p-2 rounded-xl hover:bg-sidebar-accent transition-colors cursor-pointer',
+                  !expanded && 'justify-center'
+                )}
+              >
                 <Avatar className="w-9 h-9 flex-shrink-0">
                   <AvatarFallback className="bg-mocha-200 text-mocha-700 text-sm">
                     {currentUser.name.split(' ').map(n => n[0]).join('')}
@@ -234,7 +252,10 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
                       variant="ghost"
                       size="icon"
                       className="h-8 w-8 text-muted-foreground hover:text-foreground flex-shrink-0"
-                      onClick={() => signOut()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        signOut();
+                      }}
                       aria-label="Sign out"
                     >
                       <LogOut className="w-4 h-4" />
@@ -251,6 +272,12 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
           </Tooltip>
         </div>
       </aside>
+
+      <CreateFolderModal
+        open={createFolderOpen}
+        onOpenChange={setCreateFolderOpen}
+        onSuccess={() => refetchFolders()}
+      />
     </TooltipProvider>
   );
 }

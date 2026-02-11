@@ -1,9 +1,12 @@
 import { useState } from 'react';
-import { Outlet } from 'react-router-dom';
+import { Outlet, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { CreateLeadModal } from '@/components/leads/CreateLeadModal';
+import { AddTeamMemberModal } from '@/components/admin/AddTeamMemberModal';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useUsers } from '@/hooks/useFirebaseData';
+import { useAuth } from '@/auth/AuthContext';
 import {
   Sheet,
   SheetContent,
@@ -13,7 +16,12 @@ export function AdminLayout() {
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [createLeadOpen, setCreateLeadOpen] = useState(false);
+  const [addTeamMemberOpen, setAddTeamMemberOpen] = useState(false);
   const isMobile = useIsMobile();
+  const { user } = useAuth();
+  const organizationId = 'org_1';
+  const { users, refetch: refetchUsers } = useUsers(organizationId);
+  const location = useLocation();
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background">

@@ -12,14 +12,24 @@ import { FolderStatsCard } from '@/components/dashboard/FolderStatsCard';
 import { LeadsTable } from '@/components/leads/LeadsTable';
 import { 
   mockDashboardKPIs, 
-  mockLeads, 
   mockFolderStats,
   currentUser 
 } from '@/data/mockData';
+import { useLeads } from '@/hooks/useFirebaseData';
 
 export default function Dashboard() {
+  const { leads, loading } = useLeads('org_1');
+
+  if (loading) {
+    return (
+      <div className="p-8 flex items-center justify-center">
+        <p className="text-muted-foreground">Loading dashboard...</p>
+      </div>
+    );
+  }
+
   // Get today's follow-ups
-  const todayFollowUps = mockLeads.filter(lead => {
+  const todayFollowUps = leads.filter(lead => {
     if (!lead.nextFollowUpDate) return false;
     const followUp = new Date(lead.nextFollowUpDate);
     const today = new Date();
@@ -28,7 +38,7 @@ export default function Dashboard() {
   });
 
   // Get recent leads
-  const recentLeads = [...mockLeads]
+  const recentLeads = [...leads]
     .sort((a, b) => new Date(b.lastActivityAt).getTime() - new Date(a.lastActivityAt).getTime())
     .slice(0, 5);
 
@@ -79,7 +89,7 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Follow-ups & Stats */}
         <div className="space-y-6">
-          <FollowUpsList leads={mockLeads} />
+          <FollowUpsList leads={leads} />
           <FolderStatsCard stats={mockFolderStats} />
         </div>
 

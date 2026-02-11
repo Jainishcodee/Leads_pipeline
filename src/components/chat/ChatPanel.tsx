@@ -5,17 +5,19 @@ import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { cn } from '@/lib/utils';
 import type { ChatMessage } from '@/types';
-import { currentUser } from '@/data/mockData';
+import { useAuth } from '@/auth/AuthContext';
 import { format, isToday, isYesterday } from 'date-fns';
+import { timestampToDate } from '@/lib/firestore';
 
 interface ChatPanelProps {
   messages: ChatMessage[];
   leadId: string;
   onClose: () => void;
-  onSendMessage?: (message: string) => void;
+  onSendMessage?: (message: string) => Promise<void> | void;
 }
 
 export function ChatPanel({ messages, leadId, onClose, onSendMessage }: ChatPanelProps) {
+  const { user } = useAuth();
   const [newMessage, setNewMessage] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -23,9 +25,9 @@ export function ChatPanel({ messages, leadId, onClose, onSendMessage }: ChatPane
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (newMessage.trim()) {
-      onSendMessage?.(newMessage);
+      await onSendMessage?.(newMessage);
       setNewMessage('');
     }
   };
@@ -48,7 +50,7 @@ export function ChatPanel({ messages, leadId, onClose, onSendMessage }: ChatPane
     let currentDate = '';
 
     msgs.forEach(msg => {
-      const msgDate = format(new Date(msg.createdAt), 'MMMM d, yyyy');
+      const msgDate = format(timestampToDate(msg.createdAt), 'MMMM d, yyyy');
       if (msgDate !== currentDate) {
         currentDate = msgDate;
         groups.push({ date: msgDate, messages: [msg] });
@@ -60,7 +62,10 @@ export function ChatPanel({ messages, leadId, onClose, onSendMessage }: ChatPane
     return groups;
   };
 
-  const groupedMessages = groupMessagesByDate(messages);
+  const sortedMessages = [...messages].sort(
+    (a, b) => timestampToDate(a.createdAt).getTime() - timestampToDate(b.createdAt).getTime()
+  );
+  const groupedMessages = groupMessagesByDate(sortedMessages);
 
   return (
     <div className="flex flex-col h-full bg-background border-l border-border animate-slide-in-right md:rounded-none">
@@ -88,7 +93,7 @@ export function ChatPanel({ messages, leadId, onClose, onSendMessage }: ChatPane
             {/* Messages in group */}
             <div className="space-y-4">
               {group.messages.map((message) => {
-                const isSelf = message.senderId === currentUser.id;
+                const isSelf = !!user && message.senderId === user.uid;
                 const isSystem = message.isSystemMessage;
 
                 if (isSystem) {
@@ -125,7 +130,7 @@ export function ChatPanel({ messages, leadId, onClose, onSendMessage }: ChatPane
                         {message.message}
                       </div>
                       <span className="text-xs text-muted-foreground mt-1 mx-1">
-                        {formatMessageDate(new Date(message.createdAt))}
+                        {formatMessageDate(timestampToDate(message.createdAt))}
                       </span>
                     </div>
                   </div>

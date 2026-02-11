@@ -7,6 +7,8 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/use-toast";
 import { useAuth } from "@/auth/AuthContext";
 import { getAuthErrorMessage } from "@/auth/authErrors";
+import { doc, setDoc, serverTimestamp } from "firebase/firestore";
+import { db } from "@/lib/firebase";
 
 const SignUp = () => {
   const { signUp } = useAuth();
@@ -33,7 +35,23 @@ const SignUp = () => {
     setIsSubmitting(true);
 
     try {
-      await signUp(email.trim(), password);
+      const userCredential = await signUp(email.trim(), password);
+      
+      // Create user document in Firestore
+      await setDoc(doc(db, "users", userCredential.uid), {
+        email: userCredential.email,
+        name: email.split('@')[0], // Use email prefix as default name
+        avatar: null,
+        role: 'member',
+        organizationId: 'org_1', // Default organization
+        createdAt: serverTimestamp(),
+      });
+      
+      toast({
+        title: "Account created!",
+        description: "Welcome to Mocha Pipeline.",
+      });
+      
       navigate("/", { replace: true });
     } catch (error) {
       toast({
