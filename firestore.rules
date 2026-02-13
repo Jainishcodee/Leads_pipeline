@@ -47,6 +47,7 @@ service cloud.firestore {
     match /organizations/{orgId} {
       allow read: if isSuperAdmin() || isOrgMember(orgId);
       allow write: if isSuperAdmin();
+      allow update: if isSuperAdmin() || isOrgAdmin(orgId);
     }
     
     // Users
@@ -154,6 +155,18 @@ service cloud.firestore {
         || (isAuthenticated() && request.auth.token.email != null && resource.data.email == request.auth.token.email)
         || (isAuthenticated() && resource.data.invitedById == request.auth.uid)
         || (isAuthenticated() && resource.data.organizationId == userOrgId());
+    }
+
+    // Lead Attachments
+    match /leadAttachments/{attachmentId} {
+      allow read: if isSuperAdmin() || orgScopedAccess(resource.data.organizationId);
+      allow create: if isSuperAdmin() 
+        || (orgScopedAccess(request.resource.data.organizationId)
+          && leadInOrg(request.resource.data.leadId, request.resource.data.organizationId)
+          && request.resource.data.uploadedById == request.auth.uid);
+      allow delete: if isSuperAdmin() 
+        || isOrgAdmin(resource.data.organizationId)
+        || (isAuthenticated() && resource.data.uploadedById == request.auth.uid);
     }
 
   }

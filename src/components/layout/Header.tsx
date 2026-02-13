@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Search, Plus, Bell, Menu } from 'lucide-react';
+import { Search, Plus, Bell, Menu, BellRing } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -13,7 +13,9 @@ import { useAuth } from '@/auth/AuthContext';
 import { useFirestoreCollection } from '@/lib/useFirestore';
 import { where } from 'firebase/firestore';
 import { invitesAPI, notificationsAPI, usersAPI } from '@/lib/api';
+import { browserNotifications } from '@/lib/browserNotifications';
 import { toast } from 'sonner';
+import { useNavigate } from 'react-router-dom';
 
 interface HeaderProps {
   onMenuClick?: () => void;
@@ -25,6 +27,7 @@ export function Header({ onMenuClick, onNewLead, showMenuButton = false }: Heade
   const [searchQuery, setSearchQuery] = useState('');
   const [processingInviteId, setProcessingInviteId] = useState<string | null>(null);
   const { profile } = useAuth();
+  const navigate = useNavigate();
 
   const constraints = useMemo(
     () => (profile?.id ? [where('userId', '==', profile.id)] : []),
@@ -104,6 +107,22 @@ export function Header({ onMenuClick, onNewLead, showMenuButton = false }: Heade
     }
   };
 
+  const handleNotificationClick = async (notification: any) => {
+    try {
+      // Mark as read
+      if (!notification.read) {
+        await notificationsAPI.markAsRead(notification.id);
+      }
+      
+      // Navigate to relevant page if leadId exists
+      if (notification.leadId) {
+        navigate(`/leads/${notification.leadId}`);
+      }
+    } catch (error) {
+      console.error('Error handling notification click:', error);
+    }
+  };
+
   return (
     <header className="h-14 md:h-16 border-b border-border bg-background/80 backdrop-blur-sm sticky top-0 z-40">
       <div className="flex items-center justify-between h-full px-3 md:px-6">
@@ -120,7 +139,7 @@ export function Header({ onMenuClick, onNewLead, showMenuButton = false }: Heade
             </Button>
           )}
 
-          <div className="relative flex-1 max-w-md">
+          <div className="relative flex-1 max-w-[155px] sm:max-w-xs md:max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <Input
               type="text"
@@ -133,21 +152,14 @@ export function Header({ onMenuClick, onNewLead, showMenuButton = false }: Heade
         </div>
 
         {/* Right: Actions */}
-        <div className="flex items-center gap-2 md:gap-3">
+        <div className="flex items-center gap-1 md:gap-2">
           <Button 
             onClick={onNewLead}
-            className="btn-mocha hidden sm:flex"
+            className="btn-mocha h-9 md:h-10"
             size="sm"
           >
-            <Plus className="w-4 h-4" />
-            <span className="hidden md:inline">New Lead</span>
-          </Button>
-          <Button 
-            onClick={onNewLead}
-            size="icon"
-            className="btn-mocha sm:hidden h-9 w-9"
-          >
-            <Plus className="w-4 h-4" />
+            <Plus className="w-3 h-4" />
+            <span className="ml-1.2">New Lead</span>
           </Button>
 
           {/* Notifications */}
@@ -166,6 +178,30 @@ export function Header({ onMenuClick, onNewLead, showMenuButton = false }: Heade
               <div className="p-3 border-b border-border">
                 <h3 className="font-semibold">Notifications</h3>
               </div>
+              
+              {/* Browser Notification Prompt */}
+              {browserNotifications.isSupported() && !browserNotifications.hasPermission() && (
+                <div className="p-3 border-b border-border bg-mocha-50">
+                  <div className="flex items-start gap-2">
+                    <BellRing className="w-4 h-4 text-mocha-600 mt-0.5" />
+                    <div className="flex-1">
+                      <p className="text-sm font-medium">Enable Browser Notifications</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Get notified even when you're working in other tabs
+                      </p>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="mt-2 h-7 text-xs"
+                        onClick={() => browserNotifications.requestPermission()}
+                      >
+                        Enable Notifications
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
               {pendingInvites.length > 0 && (
                 <div className="p-3 border-b border-border space-y-2">
                   <p className="text-sm font-medium">Invitations</p>
@@ -205,6 +241,7 @@ export function Header({ onMenuClick, onNewLead, showMenuButton = false }: Heade
                     <DropdownMenuItem 
                       key={notification.id}
                       className="flex flex-col items-start p-3 cursor-pointer"
+                      onClick={() => handleNotificationClick(notification)}
                     >
                       <div className="flex items-start gap-2 w-full">
                         {!notification.read && (

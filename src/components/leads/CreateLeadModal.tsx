@@ -10,6 +10,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
+import { PhoneInput } from '@/components/ui/phone-input';
 import {
   Select,
   SelectContent,
@@ -22,7 +24,7 @@ import DOMPurify from 'dompurify';
 import { Card, CardContent } from '@/components/ui/card';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import type { TaskStatus, LeadPriority, Lead } from '@/types';
-import { leadsAPI, tasksAPI, assignmentsAPI, activitiesAPI, foldersAPI } from '@/lib/api';
+import { leadsAPI, tasksAPI, assignmentsAPI, activitiesAPI, foldersAPI, notificationsAPI } from '@/lib/api';
 import { useAuth } from '@/auth/AuthContext';
 import { useFolders } from '@/hooks/useFirebaseData';
 import { useUsers } from '@/hooks/useFirebaseData';
@@ -100,6 +102,26 @@ export function CreateLeadModal({ open, onOpenChange, defaultFolderId, editingLe
     roleInLead: string;
   }>>([]);
 
+  const [contactPersons, setContactPersons] = useState<Array<{
+    id: string;
+    name: string;
+    phone: string;
+    email: string;
+    whatsapp: string;
+    sameAsPhone: boolean;
+    role: string;
+  }>>([
+    {
+      id: `contact_${Date.now()}`,
+      name: '',
+      phone: '',
+      email: '',
+      whatsapp: '',
+      sameAsPhone: false,
+      role: '',
+    }
+  ]);
+
   // Pre-fill form data when editing a lead
   useEffect(() => {
     if (editingLead && open) {
@@ -121,6 +143,27 @@ export function CreateLeadModal({ open, onOpenChange, defaultFolderId, editingLe
         assignedTo: '',
         assignedRole: '',
       });
+      
+      // Load contact persons if available, otherwise create from legacy manager fields
+      if (editingLead.contactPersons && editingLead.contactPersons.length > 0) {
+        setContactPersons(editingLead.contactPersons.map(contact => ({
+          ...contact,
+          sameAsPhone: contact.phone === contact.whatsapp && contact.phone !== '',
+          role: contact.role || '',
+        })));
+      } else if (editingLead.managerName || editingLead.managerPhone || editingLead.managerEmail) {
+        // Migrate legacy data
+        setContactPersons([{
+          id: `contact_${Date.now()}`,
+          name: editingLead.managerName || '',
+          phone: editingLead.managerPhone || '',
+          email: editingLead.managerEmail || '',
+          whatsapp: editingLead.managerWhatsapp || '',
+          sameAsPhone: editingLead.managerPhone === editingLead.managerWhatsapp && editingLead.managerPhone !== '',
+          role: '',
+        }]);
+      }
+      
       setStep(1);
     } else if (open && !editingLead) {
       // Reset form for new lead
@@ -142,6 +185,15 @@ export function CreateLeadModal({ open, onOpenChange, defaultFolderId, editingLe
         assignedTo: '',
         assignedRole: '',
       });
+      setContactPersons([{
+        id: `contact_${Date.now()}`,
+        name: '',
+        phone: '',
+        email: '',
+        whatsapp: '',
+        sameAsPhone: false,
+        role: '',
+      }]);
     }
   }, [editingLead, open, defaultFolderId]);
 
@@ -248,6 +300,50 @@ export function CreateLeadModal({ open, onOpenChange, defaultFolderId, editingLe
     setTeamMembers(teamMembers.filter(member => member.id !== memberId));
   };
 
+  // Contact person management
+  const addContactPerson = () => {
+    const newContact = {
+      id: `contact_${Date.now()}`,
+      name: '',
+      phone: '',
+      email: '',
+      whatsapp: '',
+      sameAsPhone: false,
+      role: '',
+    };
+    setContactPersons([...contactPersons, newContact]);
+  };
+
+  const updateContactPerson = (contactId: string, field: string, value: any) => {
+    setContactPersons(contactPersons.map(contact => {
+      if (contact.id === contactId) {
+        const updated = { ...contact, [field]: value };
+        // If phone changes and sameAsPhone is true, update whatsapp
+        if (field === 'phone' && contact.sameAsPhone) {
+          updated.whatsapp = value;
+        }
+        // If whatsapp changes to different value, uncheck sameAsPhone
+        if (field === 'whatsapp' && value !== contact.phone) {
+          updated.sameAsPhone = false;
+        }
+        // If sameAsPhone is checked, copy phone to whatsapp
+        if (field === 'sameAsPhone' && value === true) {
+          updated.whatsapp = contact.phone;
+        }
+        return updated;
+      }
+      return contact;
+    }));
+  };
+
+  const removeContactPerson = (contactId: string) => {
+    if (contactPersons.length > 1) {
+      setContactPersons(contactPersons.filter(contact => contact.id !== contactId));
+    } else {
+      toast.error('At least one contact person is required');
+    }
+  };
+
   const handleSubmit = async () => {
     if (!user) {
       toast.error('You must be logged in');
@@ -270,6 +366,21 @@ export function CreateLeadModal({ open, onOpenChange, defaultFolderId, editingLe
       // Get folder info
       const folder = folders.find(f => f.id === formData.folderId);
       
+      // Sanitize contact persons
+      const sanitizedContacts = contactPersons
+        .filter(contact => contact.name || contact.phone || contact.email) // Only include non-empty contacts
+        .map(contact => ({
+          id: contact.id,
+          name: DOMPurify.sanitize(contact.name, { ALLOWED_TAGS: [] }),
+          phone: DOMPurify.sanitize(contact.phone, { ALLOWED_TAGS: [] }),
+          email: DOMPurify.sanitize(contact.email, { ALLOWED_TAGS: [] }),
+          whatsapp: DOMPurify.sanitize(contact.whatsapp, { ALLOWED_TAGS: [] }),
+          role: DOMPurify.sanitize(contact.role, { ALLOWED_TAGS: [] }),
+        }));
+
+      // Use first contact for legacy fields (backward compatibility)
+      const firstContact = sanitizedContacts[0] || { name: '', phone: '', email: '', whatsapp: '' };
+      
       // Sanitize common fields
       const sanitizedData = {
         companyName: DOMPurify.sanitize(formData.companyName, { ALLOWED_TAGS: [] }),
@@ -279,10 +390,13 @@ export function CreateLeadModal({ open, onOpenChange, defaultFolderId, editingLe
         interest: formData.interest ? formData.interest.split(',').map(i => DOMPurify.sanitize(i.trim(), { ALLOWED_TAGS: [] })) : [],
         reference: formData.reference ? DOMPurify.sanitize(formData.reference, { ALLOWED_TAGS: [] }) : null,
         completeAddress: DOMPurify.sanitize(formData.completeAddress, { ALLOWED_TAGS: [] }),
-        managerName: DOMPurify.sanitize(formData.managerName, { ALLOWED_TAGS: [] }),
-        managerPhone: DOMPurify.sanitize(formData.managerPhone, { ALLOWED_TAGS: [] }),
-        managerEmail: DOMPurify.sanitize(formData.managerEmail, { ALLOWED_TAGS: [] }),
-        managerWhatsapp: DOMPurify.sanitize(formData.managerWhatsapp, { ALLOWED_TAGS: [] }),
+        // Legacy fields from first contact
+        managerName: firstContact.name,
+        managerPhone: firstContact.phone,
+        managerEmail: firstContact.email,
+        managerWhatsapp: firstContact.whatsapp,
+        // Contact persons array
+        contactPersons: sanitizedContacts,
         notes: formData.notes ? DOMPurify.sanitize(formData.notes, { ALLOWED_TAGS: [] }) : null,
       };
 
@@ -352,6 +466,19 @@ export function CreateLeadModal({ open, onOpenChange, defaultFolderId, editingLe
               completed: st.status === 'completed'
             })),
           });
+          
+          // Notify the assignee about the new task
+          if (task.assignedToId && task.assignedToId !== user.uid) {
+            await notificationsAPI.create({
+              userId: task.assignedToId,
+              organizationId,
+              type: 'task',
+              title: 'New Task Assigned',
+              message: `${user.email?.split('@')[0] || 'Someone'} assigned you a task: "${task.title}"`,
+              leadId,
+              read: false,
+            });
+          }
         }
         
         // Create team assignments
@@ -365,6 +492,19 @@ export function CreateLeadModal({ open, onOpenChange, defaultFolderId, editingLe
             roleInLead: DOMPurify.sanitize(member.roleInLead, { ALLOWED_TAGS: [] }),
             createdAt: new Date(),
           });
+          
+          // Notify the assigned team member
+          if (member.userId !== user.uid) {
+            await notificationsAPI.create({
+              userId: member.userId,
+              organizationId,
+              type: 'lead',
+              title: 'Added to Lead',
+              message: `${user.email?.split('@')[0] || 'Someone'} added you to lead: "${sanitizedData.companyName}"`,
+              leadId,
+              read: false,
+            });
+          }
         }
         
         // Log activity
@@ -533,64 +673,114 @@ export function CreateLeadModal({ open, onOpenChange, defaultFolderId, editingLe
             <div className="space-y-4 animate-fade-in">
               <h3 className="font-medium text-muted-foreground">Manager / Contact Person</h3>
               
+              {/* Contact Persons Section */}
               <div className="grid gap-4">
-                <div className="grid sm:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="managerName">Manager Name *</Label>
-                    <Input
-                      id="managerName"
-                      value={formData.managerName}
-                      onChange={(e) => updateField('managerName', e.target.value)}
-                      placeholder="e.g., Ahmed Al Rashid"
-                      className="input-mocha"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="managerEmail">Manager Email *</Label>
-                    <Input
-                      id="managerEmail"
-                      type="email"
-                      value={formData.managerEmail}
-                      onChange={(e) => updateField('managerEmail', e.target.value)}
-                      placeholder="ahmed@company.com"
-                      className="input-mocha"
-                    />
-                  </div>
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-semibold">Contact Persons</h3>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={addContactPerson}
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Contact
+                  </Button>
                 </div>
 
-                <div className="grid sm:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="managerPhone">Manager Phone *</Label>
-                    <Input
-                      id="managerPhone"
-                      value={formData.managerPhone}
-                      onChange={(e) => updateField('managerPhone', e.target.value)}
-                      placeholder="+971501234567"
-                      className="input-mocha"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="managerWhatsapp">Manager WhatsApp</Label>
-                    <Input
-                      id="managerWhatsapp"
-                      value={formData.managerWhatsapp}
-                      onChange={(e) => updateField('managerWhatsapp', e.target.value)}
-                      placeholder="Same as phone or different"
-                      className="input-mocha"
-                    />
-                  </div>
-                </div>
+                {contactPersons.map((contact, index) => (
+                  <Card key={contact.id} className="p-4">
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h4 className="font-medium text-sm">Contact Person {index + 1}</h4>
+                        {contactPersons.length > 1 && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                            onClick={() => removeContactPerson(contact.id)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="reference">Reference (if any)</Label>
-                  <Input
-                    id="reference"
-                    value={formData.reference}
-                    onChange={(e) => updateField('reference', e.target.value)}
-                    placeholder="e.g., Gulf Food Exhibition, Distributor referral"
-                    className="input-mocha"
-                  />
-                </div>
+                      {/* Name and Email on same row */}
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-2">
+                          <Label htmlFor={`contact-name-${contact.id}`} className="text-xs font-medium">Name *</Label>
+                          <Input
+                            id={`contact-name-${contact.id}`}
+                            value={contact.name}
+                            onChange={(e) => updateContactPerson(contact.id, 'name', e.target.value)}
+                            placeholder="Ahmed Al Rashid"
+                            className="input-mocha h-9 text-sm"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor={`contact-email-${contact.id}`} className="text-xs font-medium">Email *</Label>
+                          <Input
+                            id={`contact-email-${contact.id}`}
+                            type="email"
+                            value={contact.email}
+                            onChange={(e) => updateContactPerson(contact.id, 'email', e.target.value)}
+                            placeholder="ahmed@company.com"
+                            className="input-mocha h-9 text-sm"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Role, Phone, WhatsApp */}
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div className="space-y-2">
+                          <Label htmlFor={`contact-role-${contact.id}`} className="text-xs font-medium">Role *</Label>
+                          <Select value={contact.role} onValueChange={(value) => updateContactPerson(contact.id, 'role', value)}>
+                            <SelectTrigger className="h-10 text-sm">
+                              <SelectValue placeholder="Select role" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="manager">Manager</SelectItem>
+                              <SelectItem value="senior-employee">Senior Employee</SelectItem>
+                              <SelectItem value="hr">HR</SelectItem>
+                              <SelectItem value="owner">Owner</SelectItem>
+                              <SelectItem value="other">Other</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <PhoneInput
+                          id={`contact-phone-${contact.id}`}
+                          label="Phone"
+                          value={contact.phone}
+                          onChange={(value) => updateContactPerson(contact.id, 'phone', value)}
+                          required
+                          className="space-y-1 w-full"
+                        />
+                        <div>
+                          <PhoneInput
+                            id={`contact-whatsapp-${contact.id}`}
+                            label="WhatsApp"
+                            value={contact.whatsapp}
+                            onChange={(value) => updateContactPerson(contact.id, 'whatsapp', value)}
+                            placeholder="Same as phone or different"
+                            disabled={contact.sameAsPhone}
+                            className="space-y-1 w-full"
+                          />
+                          <div className="flex items-center space-x-2 mt-1.5">
+                            <Checkbox
+                              id={`sameAsPhone-${contact.id}`}
+                              checked={contact.sameAsPhone}
+                              onCheckedChange={(checked) => updateContactPerson(contact.id, 'sameAsPhone', checked)}
+                            />
+                            <Label htmlFor={`sameAsPhone-${contact.id}`} className="text-xs font-normal cursor-pointer">
+                              Same as phone
+                            </Label>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </Card>
+                ))}
               </div>
             </div>
           )}

@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { Mail, Phone, MessageCircle, Shield, User, Eye, Plus, Clock } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Mail, Phone, MessageCircle, Shield, User, Eye, Plus, Clock, Edit } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -7,8 +7,11 @@ import { useUsers } from '@/hooks/useFirebaseData';
 import { useAuth } from '@/auth/AuthContext';
 import { cn } from '@/lib/utils';
 import { AddTeamMemberModal } from '@/components/admin/AddTeamMemberModal';
-import { useFirestoreCollection } from '@/lib/useFirestore';
+import { useFirestoreCollection, useFirestoreDoc } from '@/lib/useFirestore';
 import { where } from 'firebase/firestore';
+import { updateDocument } from '@/lib/firestore';
+import { Input } from '@/components/ui/input';
+import { toast } from 'sonner';
 
 const roleConfig = {
   admin: { 
@@ -39,6 +42,15 @@ export default function Team() {
   const { users, loading } = useUsers(organizationId);
   const isAdmin = profile?.role === 'admin' || profile?.role === 'superadmin';
   const [addTeamMemberOpen, setAddTeamMemberOpen] = useState(false);
+  const [teamName, setTeamName] = useState('Team Members');
+  const [savingTeamName, setSavingTeamName] = useState(false);
+  const [editingTeamName, setEditingTeamName] = useState(false);
+
+  const { data: organization } = useFirestoreDoc<{ id: string; name?: string }>(
+    'organizations',
+    organizationId || null,
+    { listen: true }
+  );
 
   const inviteConstraints = useMemo(
     () => (organizationId && isAdmin ? [
@@ -49,6 +61,54 @@ export default function Team() {
   );
 
   const { data: pendingInvites = [] } = useFirestoreCollection<any>('invites', inviteConstraints, { listen: true });
+
+  useEffect(() => {
+    if (organization?.name) {
+      setTeamName(organization.name);
+    }
+  }, [organization?.name]);
+
+  const handleSaveTeamName = async () => {
+    if (!isAdmin || !organizationId) return;
+    const nextName = teamName.trim();
+    if (!nextName) {
+      toast.error('Team name cannot be empty');
+      return;
+    }
+
+    try {
+      setSavingTeamName(true);
+      await updateDocument('organizations', organizationId, { name: nextName });
+      toast.success('Team name updated');
+      setEditingTeamName(false);
+    } catch (error) {
+      console.error('Failed to update team name:', error);
+      toast.error('Failed to update team name');
+    } finally {
+      setSavingTeamName(false);
+    }
+  };
+
+  const handleCancelEditTeamName = () => {
+    setEditingTeamName(false);
+    if (organization?.name) {
+      setTeamName(organization.name);
+    }
+  };
+
+  const sortedUsers = useMemo(() => {
+    const priority: Record<string, number> = {
+      superadmin: 0,
+      admin: 1,
+      member: 2,
+      observer: 3,
+    };
+    return [...users].sort((a, b) => {
+      const aRank = priority[a.role] ?? 9;
+      const bRank = priority[b.role] ?? 9;
+      return aRank - bRank;
+    });
+  }, [users]);
 
   if (!organizationId) {
     return (
@@ -65,10 +125,56 @@ export default function Team() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">Team Members</h1>
-          <p className="text-muted-foreground mt-1">
-            Manage your organization's team
-          </p>
+          {editingTeamName ? (
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <Input
+                  value={teamName}
+                  onChange={(e) => setTeamName(e.target.value)}
+                  className="h-10 text-lg font-semibold max-w-xs"
+                  aria-label="Team name"
+                  autoFocus
+                />
+                <Button
+                  variant="outline"
+                  onClick={handleSaveTeamName}
+                  disabled={savingTeamName}
+                  className="h-10"
+                >
+                  {savingTeamName ? 'Saving...' : 'Save'}
+                </Button>
+                <Button
+                  variant="ghost"
+                  onClick={handleCancelEditTeamName}
+                  disabled={savingTeamName}
+                  className="h-10"
+                >
+                  Cancel
+                </Button>
+              </div>
+              <p className="text-muted-foreground">
+                Manage your organization's team
+              </p>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center gap-3">
+                <h1 className="text-2xl font-semibold">Team {organization?.name || 'Members'}</h1>
+                {isAdmin && (
+                  <button
+                    onClick={() => setEditingTeamName(true)}
+                    className="p-2 hover:bg-muted rounded-lg transition-colors"
+                    title="Edit team name"
+                  >
+                    <Edit className="w-5 h-5 text-muted-foreground hover:text-foreground" />
+                  </button>
+                )}
+              </div>
+              <p className="text-muted-foreground mt-1">
+                Manage your organization's team
+              </p>
+            </>
+          )}
         </div>
         {isAdmin && (
           <Button className="btn-mocha" onClick={() => setAddTeamMemberOpen(true)}>
@@ -114,7 +220,7 @@ export default function Team() {
         ) : users.length === 0 ? (
           <div className="col-span-full text-sm text-muted-foreground">No team members yet.</div>
         ) : (
-          users.map((user) => {
+          sortedUsers.map((user) => {
             const role = roleConfig[user.role] || roleConfig.member;
             const RoleIcon = role.icon;
             const initials = user.name.split(' ').map((n) => n[0]).join('') || 'U';

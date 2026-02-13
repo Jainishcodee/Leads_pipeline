@@ -389,3 +389,17 @@
     padding-bottom: env(safe-area-inset-bottom, 0);
   }
 }
+
+/* Prevent mobile zoom on inputs */
+@media screen and (max-width: 768px) {
+  input[type="text"],
+  input[type="email"],
+  input[type="tel"],
+  input[type="number"],
+  input[type="password"],
+  input[type="search"],
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}

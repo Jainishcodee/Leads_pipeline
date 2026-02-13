@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Send, MessageSquare, Bell } from 'lucide-react';
+import { Send, MessageSquare, Bell, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -33,7 +33,22 @@ export function BroadcastMessages({ organizationId, onClose }: BroadcastMessages
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const isAdmin = profile?.role === 'admin' || profile?.role === 'superadmin';
+
+  // Click outside handler
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (panelRef.current && !panelRef.current.contains(event.target as Node)) {
+        onClose?.();
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [onClose]);
 
   // Listen to broadcast messages
   useEffect(() => {
@@ -114,7 +129,7 @@ export function BroadcastMessages({ organizationId, onClose }: BroadcastMessages
   };
 
   return (
-    <div className="fixed inset-0 md:inset-y-0 md:right-0 md:left-auto md:w-96 z-50 md:top-16 bg-background border-l flex flex-col">
+    <div ref={panelRef} className="fixed inset-0 md:inset-y-0 md:right-0 md:left-auto md:w-96 z-50 md:top-16 bg-background border-l flex flex-col">
       {/* Header */}
       <div className="border-b p-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -127,8 +142,8 @@ export function BroadcastMessages({ organizationId, onClose }: BroadcastMessages
           </div>
         </div>
         {onClose && (
-          <Button variant="ghost" size="sm" onClick={onClose}>
-            Close
+          <Button variant="ghost" size="icon" onClick={onClose}>
+            <X className="w-4 h-4" />
           </Button>
         )}
       </div>

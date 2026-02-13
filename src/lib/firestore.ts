@@ -27,6 +27,7 @@ export const COLLECTIONS = {
   FOLDERS: 'folders',
   LEADS: 'leads',
   LEAD_ASSIGNMENTS: 'leadAssignments',
+  LEAD_ATTACHMENTS: 'leadAttachments',
   TASKS: 'tasks',
   ACTIVITIES: 'activities',
   CHAT_MESSAGES: 'chatMessages',

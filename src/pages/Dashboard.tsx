@@ -64,6 +64,7 @@ export default function Dashboard() {
       folderId: folder.id,
       folderName: folder.name,
       totalLeads: folderLeads.length,
+      convertedLeads: convertedInFolder,
       conversionRate,
     };
   });
@@ -87,7 +88,7 @@ export default function Dashboard() {
       {/* Welcome */}
       <div>
         <h1 className="text-xl md:text-2xl font-semibold text-foreground">
-          Welcome back, {authUser?.displayName?.split(' ')[0] || 'User'}
+          Welcome back, {profile?.firstName || (profile?.name as string)?.split(' ')[0] || authUser?.displayName?.split(' ')[0] || 'User'}
         </h1>
         <p className="text-sm md:text-base text-muted-foreground mt-1">
           Here's what's happening with your leads today.

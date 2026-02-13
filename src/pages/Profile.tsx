@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { PhoneInput } from '@/components/ui/phone-input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuth } from '@/auth/AuthContext';
@@ -26,17 +27,29 @@ import type { User } from '@/types';
 import { format } from 'date-fns';
 import { timestampToDate } from '@/lib/firestore';
 
+// Function to normalize names (capitalize first letter, rest lowercase)
+const normalizeName = (name: string): string => {
+  if (!name.trim()) return '';
+  return name
+    .trim()
+    .split(' ')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ');
+};
+
 export default function Profile() {
   const navigate = useNavigate();
-  const { user: authUser } = useAuth();
+  const { user: authUser, refreshProfile } = useAuth();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [formData, setFormData] = useState({
-    name: '',
+    firstName: '',
+    lastName: '',
     bio: '',
     avatar: '',
+    phone: '',
   });
   const [previewAvatar, setPreviewAvatar] = useState<string | null>(null);
 
@@ -53,10 +66,18 @@ export default function Profile() {
         if (userDoc.exists()) {
           const userData = userDoc.data() as User;
           setUser(userData);
+          
+          // Split name into first and last name
+          const nameParts = (userData.name || '').trim().split(' ');
+          const firstName = nameParts[0] || '';
+          const lastName = nameParts.slice(1).join(' ') || '';
+          
           setFormData({
-            name: userData.name || '',
+            firstName,
+            lastName,
             bio: userData.bio || '',
             avatar: userData.avatar || '',
+            phone: userData.phone || '',
           });
           if (userData.avatar) {
             setPreviewAvatar(userData.avatar);
@@ -147,20 +168,31 @@ export default function Profile() {
     try {
       setSaving(true);
       
-      if (!formData.name.trim()) {
-        toast.error('Name is required');
+      if (!formData.firstName.trim()) {
+        toast.error('First name is required');
         return;
       }
+      
+      // Normalize first and last names
+      const normalizedFirstName = normalizeName(formData.firstName);
+      const normalizedLastName = normalizeName(formData.lastName);
+      
+      // Concatenate to create full name
+      const fullName = `${normalizedFirstName} ${normalizedLastName}`.trim();
 
       const userDocRef = doc(db, 'users', authUser.uid);
       await updateDoc(userDocRef, {
-        name: formData.name.trim(),
+        firstName: normalizedFirstName,
+        lastName: normalizedLastName,
+        name: fullName,
         bio: formData.bio.trim(),
         avatar: formData.avatar,
+        phone: formData.phone.trim(),
       });
 
+      await refreshProfile();
       toast.success('Profile updated successfully');
-      setUser(prev => prev ? { ...prev, ...formData } : null);
+      setUser(prev => prev ? { ...prev, name: fullName, bio: formData.bio, avatar: formData.avatar, phone: formData.phone } : null);
     } catch (error) {
       console.error('Error saving profile:', error);
       toast.error('Failed to save profile');
@@ -223,9 +255,10 @@ export default function Profile() {
               <Avatar className="w-24 h-24 border-2 border-border">
                 <AvatarImage src={previewAvatar || formData.avatar} />
                 <AvatarFallback className="bg-mocha-100 text-mocha-700 text-xl">
-                  {formData.name
+                  {`${formData.firstName} ${formData.lastName}`
                     .split(' ')
                     .map(n => n[0])
+                    .filter(Boolean)
                     .join('')
                     .toUpperCase()}
                 </AvatarFallback>
@@ -277,17 +310,32 @@ export default function Profile() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {/* Name */}
+            {/* First Name */}
             <div className="space-y-2">
-              <Label htmlFor="name">Full Name *</Label>
+              <Label htmlFor="firstName">First Name *</Label>
               <Input
-                id="name"
-                value={formData.name}
+                id="firstName"
+                value={formData.firstName}
                 onChange={(e) => setFormData(prev => ({
                   ...prev,
-                  name: e.target.value,
+                  firstName: e.target.value,
                 }))}
-                placeholder="Enter your full name"
+                placeholder="Enter your first name"
+                className="h-10"
+              />
+            </div>
+
+            {/* Last Name */}
+            <div className="space-y-2">
+              <Label htmlFor="lastName">Last Name</Label>
+              <Input
+                id="lastName"
+                value={formData.lastName}
+                onChange={(e) => setFormData(prev => ({
+                  ...prev,
+                  lastName: e.target.value,
+                }))}
+                placeholder="Enter your last name"
                 className="h-10"
               />
             </div>
@@ -306,6 +354,15 @@ export default function Profile() {
                 Email cannot be changed
               </p>
             </div>
+
+            {/* Phone */}
+            <PhoneInput
+              id="phone"
+              label="Phone Number"
+              value={formData.phone}
+              onChange={(value) => setFormData(prev => ({ ...prev, phone: value }))}
+              placeholder="Enter phone number"
+            />
 
             {/* Bio */}
             <div className="space-y-2">

@@ -20,7 +20,8 @@ import {
   FileText,
   Users,
   Sparkles,
-  Trash2
+  Trash2,
+  Download
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -55,11 +56,13 @@ import { ChatPanel } from '@/components/chat/ChatPanel';
 import { format, formatDistanceToNow } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
-import type { ActivityLog } from '@/types';
+import type { ActivityLog, LeadAttachment } from '@/types';
 import { useLead, useLeadTasks, useLeadActivities, useLeadAssignments, useLeadChat, useUsers } from '@/hooks/useFirebaseData';
-import { leadsAPI, tasksAPI, activitiesAPI, assignmentsAPI, chatAPI, notificationsAPI } from '@/lib/api';
+import { leadsAPI, tasksAPI, activitiesAPI, assignmentsAPI, chatAPI, notificationsAPI, attachmentsAPI } from '@/lib/api';
 import { useAuth } from '@/auth/AuthContext';
 import { timestampToDate } from '@/lib/firestore';
+import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
+import { storage } from '@/lib/firebase';
 
 export default function LeadDetail() {
   const { leadId } = useParams();
@@ -91,27 +94,16 @@ export default function LeadDetail() {
   const { assignments, loading: assignmentsLoading, refetch: refetchAssignments } = useLeadAssignments(leadId, organizationId);
   const { users, loading: usersLoading } = useUsers(organizationId);
   const { messages, refetch: refetchMessages } = useLeadChat(leadId, organizationId);
-  const [attachments, setAttachments] = useState<Array<{
-    id: string;
-    name: string;
-    url: string;
-    type: string;
-    size: number;
-    createdAt: Date;
-  }>>([]);
-  const [activeAttachment, setActiveAttachment] = useState<{
-    id: string;
-    name: string;
-    url: string;
-    type: string;
-    size: number;
-    createdAt: Date;
-  } | null>(null);
+  const [attachments, setAttachments] = useState<LeadAttachment[]>([]);
+  const [loadingAttachments, setLoadingAttachments] = useState(true);
+  const [uploadingFiles, setUploadingFiles] = useState<string[]>([]);
   const [highlightedActivityId, setHighlightedActivityId] = useState<string | null>(null);
   const highlightTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const attachmentsRef = useRef(attachments);
   const [taskReviewNotes, setTaskReviewNotes] = useState<Record<string, string>>({});
+  const [editNotesMode, setEditNotesMode] = useState(false);
+  const [notesText, setNotesText] = useState('');
+  const [savingNotes, setSavingNotes] = useState(false);
 
   const toDate = (value: unknown) => (value ? timestampToDate(value) : null);
   
@@ -130,7 +122,7 @@ export default function LeadDetail() {
     
   const filteredAttachments = selectedMemberFilter === 'all'
     ? attachments
-    : attachments; // File uploads can be filtered if you store uploaderId
+    : attachments.filter(attachment => attachment.uploadedById === selectedMemberFilter);
 
   const getTaskStatusLabel = (status: string, reviewStatus?: string | null) => {
     if (status === 'done') {
@@ -257,6 +249,42 @@ export default function LeadDetail() {
     }
   };
 
+  const handleSaveNotes = async () => {
+    if (!leadId || !user) return;
+    
+    try {
+      setSavingNotes(true);
+      
+      await leadsAPI.update(leadId, {
+        notes: notesText.trim(),
+      });
+      
+      await activitiesAPI.logActivity(
+        leadId,
+        user.uid,
+        user.email?.split('@')[0] || 'User',
+        'note_update',
+        'Updated lead notes',
+        organizationId
+      );
+      
+      toast.success('Notes saved');
+      setEditNotesMode(false);
+      refetchLead();
+      refetchActivities();
+    } catch (error) {
+      console.error('Error saving notes:', error);
+      toast.error('Failed to save notes');
+    } finally {
+      setSavingNotes(false);
+    }
+  };
+
+  const handleCancelNotes = () => {
+    setNotesText(lead?.notes || '');
+    setEditNotesMode(false);
+  };
+
   const handleSetFollowUp = async () => {
     if (!leadId || !user || !followUpDate) return;
     
@@ -327,6 +355,19 @@ export default function LeadDetail() {
           { assigneeId: assignedUserId, role: 'Task Assignee' }
         );
         refetchAssignments();
+      }
+      
+      // Notify the assignee about the new task
+      if (assignedUserId !== user.uid) {
+        await notificationsAPI.create({
+          userId: assignedUserId,
+          organizationId,
+          type: 'task',
+          title: 'New Task Assigned',
+          message: `${user.email?.split('@')[0] || 'Someone'} assigned you a task: "${newTaskTitle}"`,
+          leadId,
+          read: false,
+        });
       }
       
       await activitiesAPI.logActivity(
@@ -501,27 +542,147 @@ export default function LeadDetail() {
     return `${(kb / 1024).toFixed(1)} MB`;
   };
 
-  const handleFilesSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFilesSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? []);
     if (files.length === 0) return;
+    if (!leadId || !user || !organizationId) return;
 
-    const createdAt = new Date();
-    const newAttachments = files.map((file, index) => ({
-      id: `file_${createdAt.getTime()}_${index}`,
-      name: file.name,
-      url: URL.createObjectURL(file),
-      type: file.type || 'application/octet-stream',
-      size: file.size,
-      createdAt,
-    }));
+    for (const file of files) {
+      const fileId = `file_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+      setUploadingFiles(prev => [...prev, fileId]);
 
-    setAttachments((prev) => [...newAttachments, ...prev]);
+      try {
+        // Validate file size (max 10MB)
+        if (file.size > 10 * 1024 * 1024) {
+          toast.error(`${file.name} is too large. Max size is 10MB`);
+          setUploadingFiles(prev => prev.filter(id => id !== fileId));
+          continue;
+        }
+
+        // Upload to Firebase Storage
+        const timestamp = Date.now();
+        const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+        const storagePath = `leads/${leadId}/${timestamp}_${sanitizedFileName}`;
+        const storageRef = ref(storage, storagePath);
+        
+        const uploadTask = uploadBytesResumable(storageRef, file, {
+          contentType: file.type || 'application/octet-stream',
+        });
+
+        uploadTask.on(
+          'state_changed',
+          (snapshot) => {
+            const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+            console.log(`Upload ${file.name}: ${progress.toFixed(0)}%`);
+          },
+          (error) => {
+            console.error('Upload error:', error);
+            toast.error(`Failed to upload ${file.name}`);
+            setUploadingFiles(prev => prev.filter(id => id !== fileId));
+          },
+          async () => {
+            try {
+              const downloadURL = await getDownloadURL(storageRef);
+              
+              // Save metadata to Firestore
+              const attachmentId = await attachmentsAPI.create({
+                leadId,
+                organizationId,
+                fileName: file.name,
+                fileUrl: downloadURL,
+                fileType: file.type || 'application/octet-stream',
+                fileSize: file.size,
+                uploadedById: user.uid,
+                uploadedByName: user.email?.split('@')[0] || 'User',
+              });
+
+              // Log activity
+              await activitiesAPI.logActivity(
+                leadId,
+                user.uid,
+                user.email?.split('@')[0] || 'User',
+                'file_uploaded',
+                `Uploaded file: ${file.name}`,
+                organizationId,
+                { fileName: file.name }
+              );
+
+              // Reload attachments
+              await loadAttachments();
+              toast.success(`${file.name} uploaded successfully`);
+            } catch (error) {
+              console.error('Error saving attachment:', error);
+              toast.error(`Failed to save ${file.name}`);
+            } finally {
+              setUploadingFiles(prev => prev.filter(id => id !== fileId));
+            }
+          }
+        );
+      } catch (error) {
+        console.error('Error uploading file:', error);
+        toast.error(`Failed to upload ${file.name}`);
+        setUploadingFiles(prev => prev.filter(id => id !== fileId));
+      }
+    }
+
     event.target.value = '';
   };
 
+  const handleDeleteAttachment = async (attachment: LeadAttachment) => {
+    if (!leadId || !user) return;
+    
+    const confirmed = window.confirm(`Delete ${attachment.fileName}?`);
+    if (!confirmed) return;
+
+    try {
+      // Delete from Firestore
+      await attachmentsAPI.delete(attachment.id);
+
+      // Delete from Storage
+      const storageRef = ref(storage, attachment.fileUrl);
+      await deleteObject(storageRef).catch((error) => {
+        console.error('Error deleting from storage:', error);
+        // Continue even if storage deletion fails
+      });
+
+      // Log activity
+      await activitiesAPI.logActivity(
+        leadId,
+        user.uid,
+        user.email?.split('@')[0] || 'User',
+        'file_deleted',
+        `Deleted file: ${attachment.fileName}`,
+        organizationId,
+        { fileName: attachment.fileName }
+      );
+
+      // Reload attachments
+      await loadAttachments();
+      toast.success('File deleted');
+    } catch (error) {
+      console.error('Error deleting attachment:', error);
+      toast.error('Failed to delete file');
+    }
+  };
+
+  const loadAttachments = async () => {
+    if (!leadId || !organizationId) return;
+    
+    try {
+      setLoadingAttachments(true);
+      const attachmentsList = await attachmentsAPI.getByLead(leadId, organizationId);
+      setAttachments(attachmentsList);
+    } catch (error) {
+      console.error('Error loading attachments:', error);
+      toast.error('Failed to load attachments');
+    } finally {
+      setLoadingAttachments(false);
+    }
+  };
+
   useEffect(() => {
-    attachmentsRef.current = attachments;
-  }, [attachments]);
+    loadAttachments();
+  }, [leadId, organizationId]);
 
   useEffect(() => {
     if (showTaskDialog && user?.uid && !selectedTaskAssignee) {
@@ -531,12 +692,17 @@ export default function LeadDetail() {
 
   useEffect(() => {
     return () => {
-      attachmentsRef.current.forEach((file) => URL.revokeObjectURL(file.url));
       if (highlightTimeoutRef.current) {
         clearTimeout(highlightTimeoutRef.current);
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (lead?.notes) {
+      setNotesText(lead.notes);
+    }
+  }, [lead]);
 
   if (leadLoading || tasksLoading || activitiesLoading) {
     return (
@@ -986,9 +1152,10 @@ export default function LeadDetail() {
                                     <div className="flex items-center gap-2">
                                       <Button
                                         size="sm"
+                                        variant='outline'
                                         onClick={() => handleApproveTaskReview(task.id, task.title)}
                                       >
-                                        All good 👍
+                                        All good!
                                       </Button>
                                       <Button
                                         size="sm"
@@ -1088,15 +1255,61 @@ export default function LeadDetail() {
 
                 <TabsContent value="notes" className="mt-4">
                   <div className="card-premium p-5">
-                    {lead.notes ? (
-                      <p className="text-sm whitespace-pre-wrap">{lead.notes}</p>
+                    {editNotesMode ? (
+                      <div className="space-y-4">
+                        <Textarea
+                          value={notesText}
+                          onChange={(e) => setNotesText(e.target.value)}
+                          placeholder="Enter notes about this lead..."
+                          className="min-h-[200px]"
+                        />
+                        <div className="flex gap-2">
+                          <Button 
+                            onClick={handleSaveNotes} 
+                            disabled={savingNotes}
+                            className="btn-mocha"
+                          >
+                            {savingNotes ? 'Saving...' : 'Save Notes'}
+                          </Button>
+                          <Button 
+                            variant="outline" 
+                            onClick={handleCancelNotes}
+                            disabled={savingNotes}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
+                    ) : lead.notes ? (
+                      <div>
+                        <div className="flex justify-between items-start mb-3">
+                          <h3 className="font-semibold">Notes</h3>
+                          {(profile?.role === 'admin' || profile?.role === 'member') && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setEditNotesMode(true)}
+                            >
+                              <Edit className="w-4 h-4 mr-1" />
+                              Edit
+                            </Button>
+                          )}
+                        </div>
+                        <p className="text-sm whitespace-pre-wrap">{lead.notes}</p>
+                      </div>
                     ) : (
                       <div className="text-center py-8">
                         <FileText className="w-10 h-10 mx-auto text-muted-foreground/50" />
                         <p className="text-muted-foreground mt-2">No notes yet</p>
-                        <Button variant="outline" className="mt-4">
-                          Add Note
-                        </Button>
+                        {(profile?.role === 'admin' || profile?.role === 'member') && (
+                          <Button 
+                            variant="outline" 
+                            className="mt-4"
+                            onClick={() => setEditNotesMode(true)}
+                          >
+                            Add Note
+                          </Button>
+                        )}
                       </div>
                     )}
                   </div>
@@ -1109,14 +1322,15 @@ export default function LeadDetail() {
                         <div>
                           <h3 className="font-semibold">Files</h3>
                           <p className="text-sm text-muted-foreground">
-                            Upload any file type. Files open in a preview pop-up.
+                            Upload files (max 10MB each). Files are stored securely in cloud storage.
                           </p>
                         </div>
                         <Button
                           variant="outline"
                           onClick={() => fileInputRef.current?.click()}
+                          disabled={uploadingFiles.length > 0}
                         >
-                          Upload Files
+                          {uploadingFiles.length > 0 ? 'Uploading...' : 'Upload Files'}
                         </Button>
                         <input
                           ref={fileInputRef}
@@ -1128,32 +1342,61 @@ export default function LeadDetail() {
                       </div>
                     </div>
 
-                    {filteredAttachments.length === 0 ? (
+                    {loadingAttachments ? (
+                      <div className="card-premium p-8 text-center">
+                        <p className="text-muted-foreground">Loading attachments...</p>
+                      </div>
+                    ) : filteredAttachments.length === 0 && uploadingFiles.length === 0 ? (
                       <div className="card-premium p-8 text-center">
                         <p className="text-muted-foreground">No files attached</p>
                       </div>
                     ) : (
                       <div className="space-y-3">
-                        {filteredAttachments.map((file) => (
-                          <div key={file.id} className="card-premium p-4">
+                        {uploadingFiles.map((fileId) => (
+                          <div key={fileId} className="card-premium p-4 opacity-60">
+                            <div className="flex items-center gap-3">
+                              <div className="min-w-0 flex-1">
+                                <p className="font-medium">Uploading...</p>
+                                <p className="text-xs text-muted-foreground">Please wait</p>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                        {filteredAttachments.map((attachment) => (
+                          <div key={attachment.id} className="card-premium p-4">
                             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                              <div className="min-w-0">
-                                <p className="font-medium truncate">{file.name}</p>
+                              <div className="min-w-0 flex-1">
+                                <p className="font-medium truncate">{attachment.fileName}</p>
                                 <div className="text-xs text-muted-foreground mt-1 flex flex-wrap gap-x-3 gap-y-1">
-                                  <span>{file.type || 'Unknown type'}</span>
-                                  <span>{formatFileSize(file.size)}</span>
+                                  <span>{attachment.fileType || 'Unknown type'}</span>
+                                  <span>{formatFileSize(attachment.fileSize)}</span>
                                   <span>
-                                    {format(file.createdAt, 'MMM d, yyyy • h:mm a')}
+                                    {format(attachment.createdAt, 'MMM d, yyyy • h:mm a')}
                                   </span>
+                                  <span>by {attachment.uploadedByName}</span>
                                 </div>
                               </div>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => setActiveAttachment(file)}
-                              >
-                                View
-                              </Button>
+                              <div className="flex gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  asChild
+                                >
+                                  <a href={attachment.fileUrl} target="_blank" rel="noopener noreferrer" download>
+                                    <Download className="w-4 h-4 mr-1.5" />
+                                    Download
+                                  </a>
+                                </Button>
+                                {(user?.uid === attachment.uploadedById || (profile?.role && ['admin', 'superadmin'].includes(profile.role))) && (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => handleDeleteAttachment(attachment)}
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </Button>
+                                )}
+                              </div>
                             </div>
                           </div>
                         ))}
@@ -1211,47 +1454,6 @@ export default function LeadDetail() {
           </span>
         )}
       </Button>
-
-      <Dialog open={!!activeAttachment} onOpenChange={(open) => !open && setActiveAttachment(null)}>
-        <DialogContent className="max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>File Preview</DialogTitle>
-          </DialogHeader>
-          {activeAttachment && (
-            <div className="space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="font-medium truncate">{activeAttachment.name}</p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {activeAttachment.type || 'Unknown type'} • {formatFileSize(activeAttachment.size)} •{' '}
-                    {format(activeAttachment.createdAt, 'MMM d, yyyy • h:mm a')}
-                  </p>
-                </div>
-              </div>
-              <div className="border border-border rounded-lg overflow-hidden bg-muted/30">
-                {activeAttachment.type.startsWith('image/') ? (
-                  <img
-                    src={activeAttachment.url}
-                    alt={activeAttachment.name}
-                    className="max-h-[60vh] w-full object-contain"
-                  />
-                ) : activeAttachment.type === 'application/pdf' ? (
-                  <iframe
-                    src={activeAttachment.url}
-                    title={activeAttachment.name}
-                    className="h-[60vh] w-full"
-                  />
-                ) : (
-                  <div className="p-8 text-center text-muted-foreground">
-                    <FileText className="w-10 h-10 mx-auto mb-3 text-muted-foreground/60" />
-                    <p>This file type does not support inline preview.</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
 
       {/* Convert Dialog */}
       <Dialog open={showConvertDialog} onOpenChange={setShowConvertDialog}>

@@ -3,6 +3,9 @@ import { Outlet } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { CreateLeadModal } from '@/components/leads/CreateLeadModal';
+import { ProfileCompletionModal } from '@/components/auth/ProfileCompletionModal';
+import { NotificationListener } from '@/components/NotificationListener';
+import { useAuth } from '@/auth/AuthContext';
 import { useIsMobile } from '@/hooks/use-mobile';
 import {
   Sheet,
@@ -10,9 +13,11 @@ import {
 } from '@/components/ui/sheet';
 
 export function AppLayout() {
+  const { user, profile } = useAuth();
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [createLeadOpen, setCreateLeadOpen] = useState(false);
+  const [profileRefreshKey, setProfileRefreshKey] = useState(0);
   const isMobile = useIsMobile();
 
   return (
@@ -49,6 +54,19 @@ export function AppLayout() {
         open={createLeadOpen} 
         onOpenChange={setCreateLeadOpen} 
       />
+
+      {/* Profile Completion Modal */}
+      {user && profile && (
+        <ProfileCompletionModal
+          key={profileRefreshKey}
+          user={profile}
+          authUserId={user.uid}
+          onComplete={() => setProfileRefreshKey(prev => prev + 1)}
+        />
+      )}
+
+      {/* Real-time Notification Listener */}
+      <NotificationListener />
     </div>
   );
 }

@@ -28,6 +28,8 @@ export interface User {
   id: string;
   email: string;
   name: string;
+  firstName?: string;
+  lastName?: string;
   bio?: string;
   avatar?: string;
   role: UserRole;
@@ -52,6 +54,15 @@ export interface Folder {
   createdAt: Date;
 }
 
+export interface ContactPerson {
+  id: string;
+  name: string;
+  phone: string;
+  email: string;
+  whatsapp: string;
+  role?: string;
+}
+
 export interface Lead {
   id: string;
   // Required fields
@@ -62,6 +73,11 @@ export interface Lead {
   interest: string[];
   reference?: string;
   completeAddress: string;
+  
+  // Contact persons (new field)
+  contactPersons?: ContactPerson[];
+  
+  // Legacy fields (kept for backward compatibility)
   managerName: string;
   managerPhone: string;
   managerEmail: string;
@@ -174,7 +190,7 @@ export interface Notification {
   id: string;
   userId: string;
   organizationId: string;
-  type: 'assignment' | 'task' | 'mention' | 'status_change' | 'due_soon' | 'invite' | 'invite_accept' | 'invite_reject';
+  type: 'assignment' | 'task' | 'mention' | 'status_change' | 'due_soon' | 'invite' | 'invite_accept' | 'invite_reject' | 'chat' | 'lead' | 'activity';
   title: string;
   message: string;
   leadId?: string;
@@ -192,6 +208,19 @@ export interface OrganizationInvite {
   status: 'pending' | 'accepted' | 'rejected' | 'expired';
   createdAt: Date;
   respondedAt?: Date;
+}
+
+export interface LeadAttachment {
+  id: string;
+  leadId: string;
+  organizationId: string;
+  fileName: string;
+  fileUrl: string;
+  fileType: string;
+  fileSize: number;
+  uploadedById: string;
+  uploadedByName: string;
+  createdAt: Date;
 }
 
 export interface TaskTemplate {

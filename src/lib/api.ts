@@ -11,7 +11,7 @@ import {
   dateToTimestamp
 } from './firestore';
 import { where } from 'firebase/firestore';
-import type { Lead, Task, ActivityLog, Folder, ChatMessage, Notification, LeadAssignment, User, OrganizationInvite } from '@/types';
+import type { Lead, Task, ActivityLog, Folder, ChatMessage, Notification, LeadAssignment, User, OrganizationInvite, LeadAttachment } from '@/types';
 
 // Leads API
 export const leadsAPI = {
@@ -309,3 +309,21 @@ export const organizationsAPI = {
 
 // Broadcast Messages API (replaced adminChat)
 // Using real-time listeners directly in BroadcastMessages component
+
+// Lead Attachments API
+export const attachmentsAPI = {
+  async create(attachment: Omit<LeadAttachment, 'id' | 'createdAt'>) {
+    return createDocument(COLLECTIONS.LEAD_ATTACHMENTS, attachment);
+  },
+
+  async delete(id: string) {
+    return deleteDocument(COLLECTIONS.LEAD_ATTACHMENTS, id);
+  },
+
+  async getByLead(leadId: string, organizationId: string) {
+    return getDocuments<LeadAttachment>(COLLECTIONS.LEAD_ATTACHMENTS, [
+      where('leadId', '==', leadId),
+      where('organizationId', '==', organizationId),
+    ]);
+  },
+};

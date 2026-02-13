@@ -20,6 +20,16 @@ import { useFirestoreDoc } from '@/lib/useFirestore';
 import { CreateFolderModal } from '@/components/folders/CreateFolderModal';
 import { BroadcastMessages } from '@/components/admin/BroadcastMessages';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
@@ -44,6 +54,7 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
   const [foldersOpen, setFoldersOpen] = useState(true);
   const [createFolderOpen, setCreateFolderOpen] = useState(false);
   const [broadcastOpen, setBroadcastOpen] = useState(false);
+  const [signOutDialogOpen, setSignOutDialogOpen] = useState(false);
   const { user, profile, signOut } = useAuth();
   const organizationId = profile?.organizationId || '';
   const { folders, loading: foldersLoading, refetch: refetchFolders } = useFolders(organizationId);
@@ -156,13 +167,15 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
                     </NavLink>
                   ))
                 )}
-                <button 
-                  onClick={() => setCreateFolderOpen(true)}
-                  className="sidebar-item text-sm py-2 text-muted-foreground hover:text-foreground w-full"
-                >
-                  <Plus className="w-4 h-4 flex-shrink-0" />
-                  <span>Add Folder</span>
-                </button>
+                {(profile?.role === 'admin' || profile?.role === 'superadmin') && (
+                  <button 
+                    onClick={() => setCreateFolderOpen(true)}
+                    className="sidebar-item text-sm py-2 text-muted-foreground hover:text-foreground w-full"
+                  >
+                    <Plus className="w-4 h-4 flex-shrink-0" />
+                    <span>Add Folder</span>
+                  </button>
+                )}
               </CollapsibleContent>
             </Collapsible>
           ) : (
@@ -204,7 +217,7 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
                 className={cn(
                   'sidebar-item',
                   broadcastOpen && 'sidebar-item-active',
-                  !expanded && 'justify-center px-2'
+                  !expanded && 'justify-center px-2 w-full'
                 )}
               >
                 <MessageSquare className="w-5 h-5 flex-shrink-0" />
@@ -244,7 +257,7 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
           <Tooltip>
             <TooltipTrigger asChild>
               <div 
-                onClick={() => navigate('/dashboard/profile')}
+                onClick={() => navigate(`${basePath}/profile`)}
                 className={cn(
                   'flex items-center gap-3 p-2 rounded-xl hover:bg-sidebar-accent transition-colors cursor-pointer',
                   !expanded && 'justify-center'
@@ -267,7 +280,7 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
                       className="h-8 w-8 text-muted-foreground hover:text-foreground flex-shrink-0"
                       onClick={(e) => {
                         e.stopPropagation();
-                        signOut();
+                        setSignOutDialogOpen(true);
                       }}
                       aria-label="Sign out"
                     >
@@ -299,6 +312,22 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
           onClose={() => setBroadcastOpen(false)}
         />
       )}
+      
+      {/* Sign Out Confirmation Dialog */}
+      <AlertDialog open={signOutDialogOpen} onOpenChange={setSignOutDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Sign Out</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to sign out? You will need to sign in again to access your account.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => signOut()}>Sign Out</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </TooltipProvider>
   );
 }

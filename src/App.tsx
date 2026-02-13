@@ -85,6 +85,7 @@ const App = () => (
                 <Route path="/admin/folders/:folderId" element={<FolderView />} />
                 <Route path="/admin/team" element={<Team />} />
                 <Route path="/admin/settings" element={<Settings />} />
+                <Route path="/admin/profile" element={<Profile />} />
               </Route>
             </Route>
             <Route element={<SuperAdminRoute />}>

@@ -68,7 +68,7 @@ export function ChatPanel({ messages, leadId, onClose, onSendMessage }: ChatPane
   const groupedMessages = groupMessagesByDate(sortedMessages);
 
   return (
-    <div className="flex flex-col h-full bg-background border-l border-border animate-slide-in-right md:rounded-none">
+    <div className="flex flex-col h-full bg-[hsl(var(--background)/0.8)] backdrop-blur-sm border-l border-border animate-slide-in-right md:rounded-none">
       {/* Header */}
       <div className="flex items-center justify-between p-3 md:p-4 border-b border-border safe-area-inset-top">
         <h3 className="font-semibold text-sm md:text-base">Lead Chat</h3>
