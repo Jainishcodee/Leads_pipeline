@@ -92,10 +92,14 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
       >
         {/* Logo & Org */}
         <div className="p-3 border-b border-sidebar-border">
-          <div className={cn(
-            'flex items-center gap-3',
-            !expanded && 'justify-center'
-          )}>
+          <button
+            onClick={() => navigate(basePath)}
+            className={cn(
+              'flex items-center gap-3 w-full hover:opacity-80 transition-opacity rounded-lg',
+              !expanded && 'justify-center'
+            )}
+            title="Go to Dashboard"
+          >
             <div className="w-10 h-10 rounded-xl gradient-mocha flex items-center justify-center flex-shrink-0">
               <Coffee className="w-5 h-5 text-primary-foreground" />
             </div>
@@ -105,7 +109,7 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
                 <p className="text-xs text-muted-foreground truncate">{organizationLabel}</p>
               </div>
             )}
-          </div>
+          </button>
         </div>
 
         {/* Navigation */}
@@ -215,9 +219,9 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
               <button
                 onClick={() => setBroadcastOpen(true)}
                 className={cn(
-                  'sidebar-item',
+                  'sidebar-item w-full',
                   broadcastOpen && 'sidebar-item-active',
-                  !expanded && 'justify-center px-2 w-full'
+                  !expanded && 'justify-center px-2'
                 )}
               >
                 <MessageSquare className="w-5 h-5 flex-shrink-0" />

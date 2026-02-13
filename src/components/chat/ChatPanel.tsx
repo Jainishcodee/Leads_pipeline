@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { X, Send, Paperclip, AtSign, Smile } from 'lucide-react';
+import { X, Send, Paperclip } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -145,26 +145,26 @@ export function ChatPanel({ messages, leadId, onClose, onSendMessage }: ChatPane
       {/* Input */}
       <div className="p-3 md:p-4 border-t border-border safe-area-inset-bottom">
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="icon" className="flex-shrink-0 h-8 w-8 md:h-10 md:w-10">
-            <Paperclip className="w-4 h-4 md:w-5 md:h-5 text-muted-foreground" />
-          </Button>
-          <div className="relative flex-1">
-            <Input
-              value={newMessage}
-              onChange={(e) => setNewMessage(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Type a message..."
-              className="input-mocha pr-16 md:pr-20 h-9 md:h-10 text-sm"
-            />
-            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-0.5 md:gap-1">
-              <Button variant="ghost" size="icon" className="h-6 w-6 md:h-7 md:w-7">
-                <AtSign className="w-3.5 h-3.5 md:w-4 md:h-4 text-muted-foreground" />
-              </Button>
-              <Button variant="ghost" size="icon" className="h-6 w-6 md:h-7 md:w-7 hidden sm:flex">
-                <Smile className="w-3.5 h-3.5 md:w-4 md:h-4 text-muted-foreground" />
-              </Button>
-            </div>
-          </div>
+          <input 
+            type="file" 
+            accept="image/*" 
+            id="file-input" 
+            className="hidden"
+          />
+          <label htmlFor="file-input">
+            <Button variant="ghost" size="icon" className="flex-shrink-0 h-8 w-8 md:h-10 md:w-10" asChild>
+              <span>
+                <Paperclip className="w-4 h-4 md:w-5 md:h-5 text-muted-foreground" />
+              </span>
+            </Button>
+          </label>
+          <Input
+            value={newMessage}
+            onChange={(e) => setNewMessage(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Type a message..."
+            className="flex-1 input-mocha h-9 md:h-10 text-sm"
+          />
           <Button 
             className="btn-mocha flex-shrink-0 h-9 w-9 md:h-10 md:w-10"
             size="icon"

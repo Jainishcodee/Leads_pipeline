@@ -16,12 +16,23 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { StatusBadge } from './StatusBadge';
 import { PriorityBadge } from './PriorityBadge';
 import { cn } from '@/lib/utils';
 import { timestampToDate } from '@/lib/firestore';
 import { useAuth } from '@/auth/AuthContext';
+import { leadsAPI } from '@/lib/api';
+import { toast } from 'sonner';
 import type { Lead } from '@/types';
 import { format, formatDistanceToNow } from 'date-fns';
 
@@ -34,8 +45,35 @@ export function LeadsTable({ leads, showFolder = false }: LeadsTableProps) {
   const navigate = useNavigate();
   const { profile } = useAuth();
   const basePath = profile?.role === 'admin' ? '/admin' : '/dashboard';
+  const isAdmin = profile?.role === 'admin' || profile?.role === 'superadmin';
+  
   const [sortField, setSortField] = useState<'lastActivityAt' | 'createdAt' | 'nextFollowUpDate'>('lastActivityAt');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [leadToDelete, setLeadToDelete] = useState<Lead | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleDeleteLead = async () => {
+    if (!leadToDelete) return;
+    
+    try {
+      setIsDeleting(true);
+      await leadsAPI.delete(leadToDelete.id);
+      toast.success('Lead deleted successfully');
+      setDeleteDialogOpen(false);
+      setLeadToDelete(null);
+    } catch (error) {
+      console.error('Error deleting lead:', error);
+      toast.error('Failed to delete lead');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const openDeleteDialog = (lead: Lead) => {
+    setLeadToDelete(lead);
+    setDeleteDialogOpen(true);
+  };
 
   const toDate = (value: Lead[typeof sortField] | null | undefined) =>
     value ? timestampToDate(value) : null;
@@ -220,21 +258,27 @@ export function LeadsTable({ leads, showFolder = false }: LeadsTableProps) {
                     </span>
                   </td>
                   <td>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
-                        <Button variant="ghost" size="icon" className="h-8 w-8">
-                          <MoreHorizontal className="w-4 h-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => navigate(`${basePath}/leads/${lead.id}`)}>
-                          View Details
-                        </DropdownMenuItem>
-                        <DropdownMenuItem>Edit Lead</DropdownMenuItem>
-                        <DropdownMenuItem>Assign Team</DropdownMenuItem>
-                        <DropdownMenuItem className="text-destructive">Delete</DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                    {isAdmin && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+                          <Button variant="ghost" size="icon" className="h-8 w-8">
+                            <MoreHorizontal className="w-4 h-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => navigate(`${basePath}/leads/${lead.id}`)}>
+                            View Details
+                          </DropdownMenuItem>
+                          <DropdownMenuItem>Edit Lead</DropdownMenuItem>
+                          <DropdownMenuItem 
+                            className="text-destructive"
+                            onClick={() => openDeleteDialog(lead)}
+                          >
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -248,6 +292,25 @@ export function LeadsTable({ leads, showFolder = false }: LeadsTableProps) {
           </div>
         )}
       </div>
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Lead</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete "{leadToDelete?.companyName}"? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction 
+            onClick={handleDeleteLead}
+            disabled={isDeleting}
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          >
+            {isDeleting ? 'Deleting...' : 'Delete'}
+          </AlertDialogAction>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

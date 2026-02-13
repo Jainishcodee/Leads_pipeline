@@ -221,6 +221,10 @@ export const notificationsAPI = {
     return updateDocument(COLLECTIONS.NOTIFICATIONS, id, { read: true });
   },
 
+  async delete(id: string) {
+    return deleteDocument(COLLECTIONS.NOTIFICATIONS, id);
+  },
+
   async getByUser(userId: string) {
     return getDocuments<Notification>(COLLECTIONS.NOTIFICATIONS, [where('userId', '==', userId)]);
   },

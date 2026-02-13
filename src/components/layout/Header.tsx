@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { Search, Plus, Bell, Menu, BellRing } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -33,8 +33,54 @@ export function Header({ onMenuClick, onNewLead, showMenuButton = false }: Heade
     () => (profile?.id ? [where('userId', '==', profile.id)] : []),
     [profile?.id]
   );
-  const { data: notifications = [] } = useFirestoreCollection<any>('notifications', constraints, { listen: true });
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  const { data: allNotifications = [] } = useFirestoreCollection<any>('notifications', constraints, { listen: true });
+  
+  // Calculate unread count
+  const unreadCount = allNotifications.filter((n) => !n.read).length;
+  
+  // Filter notifications to keep only last 7 days and sort by latest
+  const filteredNotifications = useMemo(() => {
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    
+    return allNotifications
+      .filter(n => {
+        const notifDate = n.createdAt?.toDate ? n.createdAt.toDate() : new Date(n.createdAt);
+        return notifDate >= sevenDaysAgo;
+      })
+      .sort((a, b) => {
+        const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.createdAt);
+        const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.createdAt);
+        return dateB.getTime() - dateA.getTime();
+      });
+  }, [allNotifications]);
+  
+  // Show only 4 latest in dropdown, rest available via View All
+  const displayNotifications = filteredNotifications.slice(0, 4);
+  const hasMore = filteredNotifications.length > 4;
+  
+  // Auto-delete old notifications from Firestore (older than 7 days)
+  useEffect(() => {
+    const deleteOldNotifications = async () => {
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      
+      for (const notif of allNotifications) {
+        const notifDate = notif.createdAt?.toDate ? notif.createdAt.toDate() : new Date(notif.createdAt);
+        if (notifDate < sevenDaysAgo) {
+          try {
+            await notificationsAPI.delete(notif.id);
+          } catch (error) {
+            console.error('Failed to delete old notification:', error);
+          }
+        }
+      }
+    };
+    
+    if (allNotifications.length > 0) {
+      deleteOldNotifications();
+    }
+  }, [allNotifications]);
 
   const inviteConstraints = useMemo(
     () => (profile?.email ? [
@@ -232,30 +278,40 @@ export function Header({ onMenuClick, onNewLead, showMenuButton = false }: Heade
                 </div>
               )}
               <div className="max-h-80 overflow-y-auto">
-                {notifications.length === 0 ? (
+                {displayNotifications.length === 0 ? (
                   <div className="p-4 text-center text-muted-foreground text-sm">
                     No notifications
                   </div>
                 ) : (
-                  notifications.map((notification) => (
-                    <DropdownMenuItem 
-                      key={notification.id}
-                      className="flex flex-col items-start p-3 cursor-pointer"
-                      onClick={() => handleNotificationClick(notification)}
-                    >
-                      <div className="flex items-start gap-2 w-full">
-                        {!notification.read && (
-                          <div className="w-2 h-2 rounded-full bg-mocha-500 mt-1.5 flex-shrink-0" />
-                        )}
-                        <div className={!notification.read ? '' : 'ml-4'}>
-                          <p className="font-medium text-sm">{notification.title}</p>
-                          <p className="text-xs text-muted-foreground mt-0.5">
-                            {notification.message}
-                          </p>
+                  <>
+                    {displayNotifications.map((notification) => (
+                      <DropdownMenuItem 
+                        key={notification.id}
+                        className="flex flex-col items-start p-3 cursor-pointer"
+                        onClick={() => handleNotificationClick(notification)}
+                      >
+                        <div className="flex items-start gap-2 w-full">
+                          {!notification.read && (
+                            <div className="w-2 h-2 rounded-full bg-mocha-500 mt-1.5 flex-shrink-0" />
+                          )}
+                          <div className={!notification.read ? '' : 'ml-4'}>
+                            <p className="font-medium text-sm">{notification.title}</p>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              {notification.message}
+                            </p>
+                          </div>
                         </div>
-                      </div>
-                    </DropdownMenuItem>
-                  ))
+                      </DropdownMenuItem>
+                    ))}
+                    {hasMore && (
+                      <DropdownMenuItem
+                        className="p-3 text-center text-mocha-600 font-medium text-sm cursor-pointer hover:bg-muted"
+                        onClick={() => navigate('/notifications')}
+                      >
+                        View All Notifications
+                      </DropdownMenuItem>
+                    )}
+                  </>
                 )}
               </div>
             </DropdownMenuContent>

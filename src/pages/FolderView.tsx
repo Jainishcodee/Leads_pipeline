@@ -23,13 +23,24 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { LeadsTable } from '@/components/leads/LeadsTable';
 import { CreateLeadModal } from '@/components/leads/CreateLeadModal';
+import { EditFolderModal } from '@/components/folders/EditFolderModal';
 import { useFolderLeads, useFolders } from '@/hooks/useFirebaseData';
 import { format } from 'date-fns';
 import { timestampToDate } from '@/lib/firestore';
 import { useAuth } from '@/auth/AuthContext';
 import { toast } from 'sonner';
+import { foldersAPI } from '@/lib/api';
 import type { Lead } from '@/types';
 
 export default function FolderView() {
@@ -38,6 +49,9 @@ export default function FolderView() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
   const [createLeadOpen, setCreateLeadOpen] = useState(false);
+  const [editFolderOpen, setEditFolderOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const { profile, user } = useAuth();
   const organizationId = profile?.organizationId || '';
@@ -48,6 +62,24 @@ export default function FolderView() {
   });
   
   const folder = folders.find(f => f.id === folderId);
+  const isAdmin = profile?.role === 'admin' || profile?.role === 'superadmin';
+
+  const handleDeleteFolder = async () => {
+    if (!folder || !folderId) return;
+    
+    try {
+      setIsDeleting(true);
+      await foldersAPI.delete(folderId);
+      toast.success('Folder deleted successfully');
+      setDeleteDialogOpen(false);
+      navigate('/dashboard');
+    } catch (error) {
+      console.error('Error deleting folder:', error);
+      toast.error('Failed to delete folder');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
   
   const exportToCSV = () => {
     try {
@@ -183,21 +215,30 @@ export default function FolderView() {
             <Plus className="w-4 h-4" />
             <span>Add Lead</span>
           </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="icon">
-                <MoreHorizontal className="w-4 h-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={exportToCSV}>
-                <Download className="w-4 h-4 mr-2" />
-                Export to CSV
-              </DropdownMenuItem>
-              <DropdownMenuItem>Edit Folder</DropdownMenuItem>
-              <DropdownMenuItem className="text-destructive">Delete Folder</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {isAdmin && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="icon">
+                  <MoreHorizontal className="w-4 h-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={exportToCSV}>
+                  <Download className="w-4 h-4 mr-2" />
+                  Export to CSV
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setEditFolderOpen(true)}>
+                  Edit Folder
+                </DropdownMenuItem>
+                <DropdownMenuItem 
+                  className="text-destructive"
+                  onClick={() => setDeleteDialogOpen(true)}
+                >
+                  Delete Folder
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
       </div>
 
@@ -265,6 +306,36 @@ export default function FolderView() {
         onOpenChange={setCreateLeadOpen}
         defaultFolderId={folderId}
       />
+
+      {folder && (
+        <EditFolderModal
+          open={editFolderOpen}
+          onOpenChange={setEditFolderOpen}
+          folder={folder}
+          onSuccess={() => {
+            // Folder list will automatically refresh due to useEffect in useFolders
+          }}
+        />
+      )}
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Folder</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this folder? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction 
+            onClick={handleDeleteFolder}
+            disabled={isDeleting}
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          >
+            {isDeleting ? 'Deleting...' : 'Delete'}
+          </AlertDialogAction>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
