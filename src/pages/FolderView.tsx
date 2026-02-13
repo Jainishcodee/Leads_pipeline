@@ -31,6 +31,7 @@ import { useFolderLeads, useFolders } from '@/hooks/useFirebaseData';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { timestampToDate } from '@/lib/firestore';
+import { useAuth } from '@/auth/AuthContext';
 
 export default function FolderView() {
   const { folderId } = useParams();
@@ -40,8 +41,13 @@ export default function FolderView() {
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
   const [createLeadOpen, setCreateLeadOpen] = useState(false);
 
-  const { folders, loading: foldersLoading } = useFolders('org_1');
-  const { leads: folderLeads, loading: leadsLoading } = useFolderLeads(folderId || '', 'org_1');
+  const { profile, user } = useAuth();
+  const organizationId = profile?.organizationId || '';
+  const { folders, loading: foldersLoading } = useFolders(organizationId);
+  const { leads: folderLeads, loading: leadsLoading } = useFolderLeads(folderId || '', organizationId, {
+    role: profile?.role,
+    userId: user?.uid,
+  });
   
   const folder = folders.find(f => f.id === folderId);
   

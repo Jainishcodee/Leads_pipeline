@@ -10,23 +10,63 @@ import { KPICard } from '@/components/dashboard/KPICard';
 import { FollowUpsList } from '@/components/dashboard/FollowUpsList';
 import { FolderStatsCard } from '@/components/dashboard/FolderStatsCard';
 import { LeadsTable } from '@/components/leads/LeadsTable';
-import { 
-  mockDashboardKPIs, 
-  mockFolderStats,
-  currentUser 
-} from '@/data/mockData';
-import { useLeads } from '@/hooks/useFirebaseData';
+import { useLeads, useFolders } from '@/hooks/useFirebaseData';
+import { useAuth } from '@/auth/AuthContext';
+import { timestampToDate } from '@/lib/firestore';
 
 export default function Dashboard() {
-  const { leads, loading } = useLeads('org_1');
+  const { user: authUser, profile } = useAuth();
+  const organizationId = profile?.organizationId || '';
+  const { leads, loading } = useLeads(organizationId, { role: profile?.role, userId: authUser?.uid });
+  const { folders, loading: foldersLoading } = useFolders(organizationId);
 
-  if (loading) {
+  if (!organizationId) {
+    return (
+      <div className="p-8 flex items-center justify-center">
+        <p className="text-muted-foreground">No organization assigned. Please contact an admin.</p>
+      </div>
+    );
+  }
+
+  if (loading || foldersLoading) {
     return (
       <div className="p-8 flex items-center justify-center">
         <p className="text-muted-foreground">Loading dashboard...</p>
       </div>
     );
   }
+
+  // Calculate KPIs from real data
+  const totalLeads = leads.length;
+  const convertedLeads = leads.filter(l => l.convertedAt).length;
+  const ongoingLeads = leads.filter(l => !l.convertedAt && !l.cancelledAt).length;
+  const successRate = totalLeads > 0 ? Math.round((convertedLeads / totalLeads) * 100) : 0;
+  
+  // Calculate average time to convert
+  const convertedLeadsWithDates = leads.filter(l => l.convertedAt && l.createdAt);
+  const avgTimeToConvert = convertedLeadsWithDates.length > 0 
+    ? Math.round(
+        convertedLeadsWithDates.reduce((sum, l) => {
+          const created = timestampToDate(l.createdAt);
+          const converted = timestampToDate(l.convertedAt!);
+          const days = Math.floor((converted.getTime() - created.getTime()) / (1000 * 60 * 60 * 24));
+          return sum + days;
+        }, 0) / convertedLeadsWithDates.length
+      )
+    : 0;
+
+  // Calculate folder stats from real data
+  const folderStats = folders.map(folder => {
+    const folderLeads = leads.filter(l => l.folderId === folder.id);
+    const convertedInFolder = folderLeads.filter(l => l.convertedAt).length;
+    const conversionRate = folderLeads.length > 0 ? Math.round((convertedInFolder / folderLeads.length) * 100) : 0;
+    return {
+      folderId: folder.id,
+      folderName: folder.name,
+      totalLeads: folderLeads.length,
+      conversionRate,
+    };
+  });
 
   // Get today's follow-ups
   const todayFollowUps = leads.filter(lead => {
@@ -47,7 +87,7 @@ export default function Dashboard() {
       {/* Welcome */}
       <div>
         <h1 className="text-xl md:text-2xl font-semibold text-foreground">
-          Welcome back, {currentUser.name.split(' ')[0]}
+          Welcome back, {authUser?.displayName?.split(' ')[0] || 'User'}
         </h1>
         <p className="text-sm md:text-base text-muted-foreground mt-1">
           Here's what's happening with your leads today.
@@ -58,28 +98,28 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KPICard
           title="Total Leads"
-          value={mockDashboardKPIs.totalLeads}
+          value={totalLeads}
           subtitle="All time"
           icon={Users}
           trend={{ value: 12, isPositive: true }}
         />
         <KPICard
           title="Ongoing"
-          value={mockDashboardKPIs.ongoingLeads}
+          value={ongoingLeads}
           subtitle="In pipeline"
           icon={Clock}
         />
         <KPICard
           title="Converted"
-          value={mockDashboardKPIs.convertedLeads}
+          value={convertedLeads}
           subtitle="Successfully closed"
           icon={CheckCircle}
           trend={{ value: 8, isPositive: true }}
         />
         <KPICard
           title="Success Rate"
-          value={`${mockDashboardKPIs.successRate}%`}
-          subtitle={`Avg. ${mockDashboardKPIs.avgTimeToConvert} days to convert`}
+          value={`${successRate}%`}
+          subtitle={`Avg. ${avgTimeToConvert} days to convert`}
           icon={Target}
           trend={{ value: 3, isPositive: true }}
         />
@@ -90,7 +130,7 @@ export default function Dashboard() {
         {/* Follow-ups & Stats */}
         <div className="space-y-6">
           <FollowUpsList leads={leads} />
-          <FolderStatsCard stats={mockFolderStats} />
+          <FolderStatsCard stats={folderStats} />
         </div>
 
         {/* Recent Activity */}

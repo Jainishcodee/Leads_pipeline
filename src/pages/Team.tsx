@@ -1,22 +1,14 @@
-import { 
-  Plus, 
-  Mail, 
-  MoreHorizontal,
-  Shield,
-  User,
-  Eye
-} from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Mail, Phone, MessageCircle, Shield, User, Eye, Plus, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { mockUsers, currentUser } from '@/data/mockData';
+import { useUsers } from '@/hooks/useFirebaseData';
+import { useAuth } from '@/auth/AuthContext';
 import { cn } from '@/lib/utils';
+import { AddTeamMemberModal } from '@/components/admin/AddTeamMemberModal';
+import { useFirestoreCollection } from '@/lib/useFirestore';
+import { where } from 'firebase/firestore';
 
 const roleConfig = {
   admin: { 
@@ -34,9 +26,40 @@ const roleConfig = {
     icon: Eye, 
     className: 'bg-slate-100 text-slate-700' 
   },
+  superadmin: {
+    label: 'Super Admin',
+    icon: Shield,
+    className: 'bg-amber-100 text-amber-700',
+  },
 };
 
 export default function Team() {
+  const { profile } = useAuth();
+  const organizationId = profile?.organizationId || '';
+  const { users, loading } = useUsers(organizationId);
+  const isAdmin = profile?.role === 'admin' || profile?.role === 'superadmin';
+  const [addTeamMemberOpen, setAddTeamMemberOpen] = useState(false);
+
+  const inviteConstraints = useMemo(
+    () => (organizationId && isAdmin ? [
+      where('organizationId', '==', organizationId),
+      where('status', '==', 'pending'),
+    ] : []),
+    [organizationId, isAdmin]
+  );
+
+  const { data: pendingInvites = [] } = useFirestoreCollection<any>('invites', inviteConstraints, { listen: true });
+
+  if (!organizationId) {
+    return (
+      <div className="p-6 lg:p-8 max-w-5xl mx-auto">
+        <div className="card-premium p-6">
+          <p className="text-muted-foreground">No organization assigned. Ask a super admin to link you to an organization.</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6 lg:p-8 max-w-5xl mx-auto space-y-6">
       {/* Header */}
@@ -47,67 +70,118 @@ export default function Team() {
             Manage your organization's team
           </p>
         </div>
-        {currentUser.role === 'admin' && (
-          <Button className="btn-mocha">
+        {isAdmin && (
+          <Button className="btn-mocha" onClick={() => setAddTeamMemberOpen(true)}>
             <Plus className="w-4 h-4 mr-1.5" />
             Invite Member
           </Button>
         )}
       </div>
 
+      {isAdmin && (
+        <div className="card-premium p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="font-semibold">Pending invites</h3>
+              <p className="text-sm text-muted-foreground">Invitations awaiting acceptance</p>
+            </div>
+            <Badge variant="secondary">{pendingInvites.length}</Badge>
+          </div>
+          <div className="mt-3 space-y-2">
+            {pendingInvites.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No pending invites.</p>
+            ) : (
+              pendingInvites.map((invite: any) => (
+                <div key={invite.id} className="flex items-center justify-between rounded border border-border px-3 py-2">
+                  <div>
+                    <p className="font-medium text-sm">{invite.email}</p>
+                    <p className="text-xs text-muted-foreground flex items-center gap-1">
+                      <Clock className="w-3 h-3" /> Pending
+                    </p>
+                  </div>
+                  <Badge className="capitalize" variant="outline">{invite.status}</Badge>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Team Grid */}
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {mockUsers.map((user) => {
-          const role = roleConfig[user.role];
-          const RoleIcon = role.icon;
-
-          return (
-            <div key={user.id} className="card-premium p-5">
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-3">
-                  <Avatar className="w-12 h-12">
-                    <AvatarFallback className="bg-mocha-100 text-mocha-700">
-                      {user.name.split(' ').map(n => n[0]).join('')}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div>
-                    <p className="font-medium">{user.name}</p>
-                    <Badge className={cn('mt-1', role.className)}>
-                      <RoleIcon className="w-3 h-3 mr-1" />
-                      {role.label}
-                    </Badge>
+        {loading ? (
+          <div className="col-span-full text-sm text-muted-foreground">Loading team...</div>
+        ) : users.length === 0 ? (
+          <div className="col-span-full text-sm text-muted-foreground">No team members yet.</div>
+        ) : (
+          users.map((user) => {
+            const role = roleConfig[user.role] || roleConfig.member;
+            const RoleIcon = role.icon;
+            const initials = user.name.split(' ').map((n) => n[0]).join('') || 'U';
+            const phone = user.phone || '';
+            const whatsappHref = phone ? `https://wa.me/${phone.replace(/\D/g, '')}` : undefined;
+            return (
+              <div key={user.id} className="card-premium p-5">
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-3">
+                    <Avatar className="w-12 h-12">
+                      <AvatarFallback className="bg-mocha-100 text-mocha-700">
+                        {initials}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div>
+                      <p className="font-medium">{user.name}</p>
+                      <Badge className={cn('mt-1', role.className)}>
+                        <RoleIcon className="w-3 h-3 mr-1" />
+                        {role.label}
+                      </Badge>
+                    </div>
                   </div>
                 </div>
-                
-                {currentUser.role === 'admin' && user.id !== currentUser.id && (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-8 w-8">
-                        <MoreHorizontal className="w-4 h-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem>Change Role</DropdownMenuItem>
-                      <DropdownMenuItem>View Activity</DropdownMenuItem>
-                      <DropdownMenuItem className="text-destructive">Remove</DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                )}
-              </div>
 
-              <div className="mt-4 pt-4 border-t border-border">
-                <a 
-                  href={`mailto:${user.email}`}
-                  className="flex items-center gap-2 text-sm text-muted-foreground hover:text-primary transition-colors"
-                >
-                  <Mail className="w-4 h-4" />
-                  {user.email}
-                </a>
+                <div className="mt-4 pt-4 border-t border-border space-y-2 text-sm text-muted-foreground">
+                  <a 
+                    href={`mailto:${user.email}`}
+                    className="flex items-center gap-2 hover:text-primary transition-colors"
+                  >
+                    <Mail className="w-4 h-4" />
+                    {user.email}
+                  </a>
+                  {phone && (
+                    <a
+                      href={`tel:${phone}`}
+                      className="flex items-center gap-2 hover:text-primary transition-colors"
+                    >
+                      <Phone className="w-4 h-4" />
+                      {phone}
+                    </a>
+                  )}
+                  {whatsappHref && (
+                    <a
+                      href={whatsappHref}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center gap-2 hover:text-primary transition-colors"
+                    >
+                      <MessageCircle className="w-4 h-4" />
+                      WhatsApp
+                    </a>
+                  )}
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })
+        )}
       </div>
+
+      <AddTeamMemberModal
+        open={addTeamMemberOpen}
+        onOpenChange={setAddTeamMemberOpen}
+        availableUsers={users}
+        currentTeamMembers={users}
+        organizationId={organizationId}
+        onSuccess={() => setAddTeamMemberOpen(false)}
+      />
     </div>
   );
 }

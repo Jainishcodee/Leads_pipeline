@@ -21,6 +21,7 @@ import { StatusBadge } from './StatusBadge';
 import { PriorityBadge } from './PriorityBadge';
 import { cn } from '@/lib/utils';
 import { timestampToDate } from '@/lib/firestore';
+import { useAuth } from '@/auth/AuthContext';
 import type { Lead } from '@/types';
 import { format, formatDistanceToNow } from 'date-fns';
 
@@ -31,6 +32,8 @@ interface LeadsTableProps {
 
 export function LeadsTable({ leads, showFolder = false }: LeadsTableProps) {
   const navigate = useNavigate();
+  const { profile } = useAuth();
+  const basePath = profile?.role === 'admin' ? '/admin' : '/dashboard';
   const [sortField, setSortField] = useState<'lastActivityAt' | 'createdAt' | 'nextFollowUpDate'>('lastActivityAt');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
@@ -59,7 +62,7 @@ export function LeadsTable({ leads, showFolder = false }: LeadsTableProps) {
   const MobileLeadCard = ({ lead }: { lead: Lead }) => (
     <div 
       className="card-premium p-4 cursor-pointer hover:bg-muted/30 transition-colors"
-      onClick={() => navigate(`/dashboard/leads/${lead.id}`)}
+      onClick={() => navigate(`${basePath}/leads/${lead.id}`)}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3 min-w-0 flex-1">
@@ -154,7 +157,7 @@ export function LeadsTable({ leads, showFolder = false }: LeadsTableProps) {
                 <tr 
                   key={lead.id} 
                   className="cursor-pointer"
-                  onClick={() => navigate(`/dashboard/leads/${lead.id}`)}
+                  onClick={() => navigate(`${basePath}/leads/${lead.id}`)}
                 >
                   <td>
                     <div className="flex items-center gap-3">
@@ -224,7 +227,7 @@ export function LeadsTable({ leads, showFolder = false }: LeadsTableProps) {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => navigate(`/dashboard/leads/${lead.id}`)}>
+                        <DropdownMenuItem onClick={() => navigate(`${basePath}/leads/${lead.id}`)}>
                           View Details
                         </DropdownMenuItem>
                         <DropdownMenuItem>Edit Lead</DropdownMenuItem>

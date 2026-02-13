@@ -2,8 +2,6 @@ import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { Coffee } from "lucide-react";
 import { useAuth } from "@/auth/AuthContext";
 
-const ADMIN_EMAIL = 'jainishshah356@gmail.com';
-
 const AuthLoadingScreen = () => (
   <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-mocha-50 via-background to-gold-100">
     <div className="flex flex-col items-center gap-3 text-muted-foreground animate-pulse-soft">
@@ -16,19 +14,22 @@ const AuthLoadingScreen = () => (
 );
 
 export function ProtectedRoute({ redirectTo = "/login" }: { redirectTo?: string }) {
-  const { user, loading } = useAuth();
+  const { user, profile, loading } = useAuth();
   const location = useLocation();
 
   if (loading) {
     return <AuthLoadingScreen />;
   }
 
-  if (!user) {
+  if (!user || !profile) {
     return <Navigate to={redirectTo} replace state={{ from: location }} />;
   }
 
-  // Redirect admin users to admin dashboard
-  if (user.email === ADMIN_EMAIL) {
+  if (profile.role === 'superadmin') {
+    return <Navigate to="/super-admin" replace />;
+  }
+
+  if (profile.role === 'admin') {
     return <Navigate to="/admin" replace />;
   }
 
@@ -36,18 +37,18 @@ export function ProtectedRoute({ redirectTo = "/login" }: { redirectTo?: string 
 }
 
 export function AdminRoute({ redirectTo = "/" }: { redirectTo?: string }) {
-  const { user, loading } = useAuth();
+  const { user, profile, loading } = useAuth();
   const location = useLocation();
 
   if (loading) {
     return <AuthLoadingScreen />;
   }
 
-  if (!user) {
+  if (!user || !profile) {
     return <Navigate to="/login" replace state={{ from: location }} />;
   }
 
-  if (user.email !== ADMIN_EMAIL) {
+  if (profile.role !== 'admin' && profile.role !== 'superadmin') {
     return <Navigate to={redirectTo} replace />;
   }
 
@@ -55,17 +56,38 @@ export function AdminRoute({ redirectTo = "/" }: { redirectTo?: string }) {
 }
 
 export function PublicOnlyRoute({ redirectTo = "/" }: { redirectTo?: string }) {
-  const { user, loading } = useAuth();
+  const { user, profile, loading } = useAuth();
 
   if (loading) {
     return <AuthLoadingScreen />;
   }
 
-  if (user) {
-    // Check if user is admin and redirect to admin dashboard
-    if (user.email === ADMIN_EMAIL) {
+  if (user && profile) {
+    if (profile.role === 'superadmin') {
+      return <Navigate to="/super-admin" replace />;
+    }
+    if (profile.role === 'admin') {
       return <Navigate to="/admin" replace />;
     }
+    return <Navigate to={redirectTo} replace />;
+  }
+
+  return <Outlet />;
+}
+
+export function SuperAdminRoute({ redirectTo = "/" }: { redirectTo?: string }) {
+  const { user, profile, loading } = useAuth();
+  const location = useLocation();
+
+  if (loading) {
+    return <AuthLoadingScreen />;
+  }
+
+  if (!user || !profile) {
+    return <Navigate to="/login" replace state={{ from: location }} />;
+  }
+
+  if (profile.role !== 'superadmin') {
     return <Navigate to={redirectTo} replace />;
   }
 

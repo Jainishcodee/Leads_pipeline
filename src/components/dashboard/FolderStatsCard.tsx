@@ -3,6 +3,7 @@ import { FolderOpen, ArrowRight, TrendingUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/auth/AuthContext';
 import type { FolderStats } from '@/types';
 
 interface FolderStatsCardProps {
@@ -12,6 +13,8 @@ interface FolderStatsCardProps {
 
 export function FolderStatsCard({ stats, className }: FolderStatsCardProps) {
   const navigate = useNavigate();
+  const { profile } = useAuth();
+  const basePath = profile?.role === 'admin' ? '/admin' : '/dashboard';
 
   return (
     <div className={cn('card-premium', className)}>
@@ -27,7 +30,7 @@ export function FolderStatsCard({ stats, className }: FolderStatsCardProps) {
           <div 
             key={folder.folderId}
             className="p-4 hover:bg-muted/30 transition-colors cursor-pointer"
-            onClick={() => navigate(`/folders/${folder.folderId}`)}
+            onClick={() => navigate(`${basePath}/folders/${folder.folderId}`)}
           >
             <div className="flex items-center justify-between mb-2">
               <p className="font-medium text-sm">{folder.folderName}</p>

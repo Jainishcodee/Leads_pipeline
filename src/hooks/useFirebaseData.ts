@@ -1,32 +1,68 @@
 // Custom hooks for Firestore data fetching
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { where, orderBy } from 'firebase/firestore';
 import { leadsAPI, tasksAPI, activitiesAPI, foldersAPI, chatAPI, assignmentsAPI, usersAPI } from '@/lib/api';
-import type { Lead, Task, ActivityLog, Folder, ChatMessage, LeadAssignment, User } from '@/types';
+import type { Lead, Task, ActivityLog, Folder, ChatMessage, LeadAssignment, User, UserRole } from '@/types';
 import { useAuth } from '@/auth/AuthContext';
-import { timestampToDate } from '@/lib/firestore';
+import { timestampToDate, buildLeadsQuery, buildTasksQuery, buildActivitiesQuery } from '@/lib/firestore';
+import { useFirestoreCollection } from '@/lib/useFirestore';
 
-export function useLeads(organizationId: string) {
-  const [leads, setLeads] = useState<Lead[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
+export function useLeads(organizationId: string, options?: { role?: UserRole; userId?: string }) {
+  const constraints = useMemo(() => buildLeadsQuery({ organizationId }), [organizationId]);
+  const { data, loading, error, refetch } = useFirestoreCollection<Lead>('leads', constraints, { listen: true });
+  const assignmentConstraints = useMemo(
+    () =>
+      options?.role === 'member' && options?.userId && organizationId
+        ? [where('organizationId', '==', organizationId), where('userId', '==', options.userId)]
+        : [],
+    [organizationId, options?.role, options?.userId]
+  );
+  const taskConstraints = useMemo(
+    () =>
+      options?.role === 'member' && options?.userId && organizationId
+        ? [where('organizationId', '==', organizationId), where('assignedToId', '==', options.userId)]
+        : [],
+    [organizationId, options?.role, options?.userId]
+  );
+  const shouldListenAssignments = Boolean(options?.role === 'member' && options?.userId && organizationId);
+  const shouldListenTasks = Boolean(options?.role === 'member' && options?.userId && organizationId);
+  const {
+    data: assignments,
+    loading: assignmentsLoading,
+    error: assignmentsError,
+  } = useFirestoreCollection<LeadAssignment>('leadAssignments', assignmentConstraints, {
+    listen: shouldListenAssignments,
+    skip: !shouldListenAssignments,
+  });
+  const {
+    data: assignedTasks,
+    loading: tasksLoading,
+    error: tasksError,
+  } = useFirestoreCollection<Task>('tasks', taskConstraints, {
+    listen: shouldListenTasks,
+    skip: !shouldListenTasks,
+  });
 
-  useEffect(() => {
-    const fetchLeads = async () => {
-      try {
-        setLoading(true);
-        const data = await leadsAPI.getAll(organizationId);
-        setLeads(data);
-      } catch (err) {
-        setError(err as Error);
-      } finally {
-        setLoading(false);
-      }
-    };
+  const leads = useMemo(() => {
+    if (!options?.role || options.role === 'admin' || options.role === 'superadmin') {
+      return data;
+    }
+    if (options.role === 'member' && options.userId) {
+      const assignedLeadIds = new Set(assignments.map((assignment) => assignment.leadId));
+      const taskLeadIds = new Set(assignedTasks.map((task) => task.leadId));
+      return data.filter(
+        (lead) => lead.createdById === options.userId || assignedLeadIds.has(lead.id) || taskLeadIds.has(lead.id)
+      );
+    }
+    return data;
+  }, [data, assignments, assignedTasks, options?.role, options?.userId]);
 
-    fetchLeads();
-  }, [organizationId]);
-
-  return { leads, loading, error, refetch: () => leadsAPI.getAll(organizationId).then(setLeads) };
+  return {
+    leads,
+    loading: loading || (options?.role === 'member' ? assignmentsLoading || tasksLoading : false),
+    error: error || assignmentsError || tasksError,
+    refetch,
+  };
 }
 
 export function useLead(leadId: string | undefined) {
@@ -58,281 +94,196 @@ export function useLead(leadId: string | undefined) {
   return { lead, loading, error, refetch: () => leadId && leadsAPI.getById(leadId).then(setLead) };
 }
 
-export function useFolderLeads(folderId: string, organizationId: string) {
-  const [leads, setLeads] = useState<Lead[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
+export function useFolderLeads(
+  folderId: string,
+  organizationId: string,
+  options?: { role?: UserRole; userId?: string }
+) {
+  const constraints = useMemo(() => buildLeadsQuery({ organizationId, folderId }), [folderId, organizationId]);
+  const { data, loading, error, refetch } = useFirestoreCollection<Lead>('leads', constraints, { listen: true });
+  const assignmentConstraints = useMemo(
+    () =>
+      options?.role === 'member' && options?.userId && organizationId
+        ? [where('organizationId', '==', organizationId), where('userId', '==', options.userId)]
+        : [],
+    [organizationId, options?.role, options?.userId]
+  );
+  const taskConstraints = useMemo(
+    () =>
+      options?.role === 'member' && options?.userId && organizationId
+        ? [where('organizationId', '==', organizationId), where('assignedToId', '==', options.userId)]
+        : [],
+    [organizationId, options?.role, options?.userId]
+  );
+  const shouldListenAssignments = Boolean(options?.role === 'member' && options?.userId && organizationId);
+  const shouldListenTasks = Boolean(options?.role === 'member' && options?.userId && organizationId);
+  const {
+    data: assignments,
+    loading: assignmentsLoading,
+    error: assignmentsError,
+  } = useFirestoreCollection<LeadAssignment>('leadAssignments', assignmentConstraints, {
+    listen: shouldListenAssignments,
+    skip: !shouldListenAssignments,
+  });
+  const {
+    data: assignedTasks,
+    loading: tasksLoading,
+    error: tasksError,
+  } = useFirestoreCollection<Task>('tasks', taskConstraints, {
+    listen: shouldListenTasks,
+    skip: !shouldListenTasks,
+  });
 
-  useEffect(() => {
-    const fetchLeads = async () => {
-      try {
-        setLoading(true);
-        const data = await leadsAPI.getByFolder(folderId, organizationId);
-        setLeads(data);
-      } catch (err) {
-        setError(err as Error);
-      } finally {
-        setLoading(false);
-      }
-    };
+  const leads = useMemo(() => {
+    if (!options?.role || options.role === 'admin' || options.role === 'superadmin') {
+      return data;
+    }
+    if (options.role === 'member' && options.userId) {
+      const assignedLeadIds = new Set(assignments.map((assignment) => assignment.leadId));
+      const taskLeadIds = new Set(assignedTasks.map((task) => task.leadId));
+      return data.filter(
+        (lead) => lead.createdById === options.userId || assignedLeadIds.has(lead.id) || taskLeadIds.has(lead.id)
+      );
+    }
+    return data;
+  }, [data, assignments, assignedTasks, options?.role, options?.userId]);
 
-    fetchLeads();
-  }, [folderId, organizationId]);
-
-  return { leads, loading, error, refetch: () => leadsAPI.getByFolder(folderId, organizationId).then(setLeads) };
+  return {
+    leads,
+    loading: loading || (options?.role === 'member' ? assignmentsLoading || tasksLoading : false),
+    error: error || assignmentsError || tasksError,
+    refetch,
+  };
 }
 
-export function useLeadTasks(leadId: string | undefined) {
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
-
-  useEffect(() => {
-    if (!leadId) {
-      setLoading(false);
-      return;
-    }
-
-    const fetchTasks = async () => {
-      try {
-        setLoading(true);
-        const data = await tasksAPI.getByLead(leadId);
-        setTasks(data);
-      } catch (err) {
-        setError(err as Error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchTasks();
-  }, [leadId]);
-
-  return { tasks, loading, error, refetch: () => leadId && tasksAPI.getByLead(leadId).then(setTasks) };
+export function useLeadTasks(leadId: string | undefined, organizationId?: string) {
+  const constraints = useMemo(
+    () => (leadId ? buildTasksQuery({ leadId, organizationId }) : []),
+    [leadId, organizationId]
+  );
+  const { data, loading, error, refetch } = useFirestoreCollection<Task>('tasks', constraints, { listen: true });
+  return { tasks: data, loading, error, refetch };
 }
 
-export function useLeadActivities(leadId: string | undefined) {
-  const [activities, setActivities] = useState<ActivityLog[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
-
-  useEffect(() => {
-    if (!leadId) {
-      setLoading(false);
-      return;
-    }
-
-    const fetchActivities = async () => {
-      try {
-        setLoading(true);
-        const data = await activitiesAPI.getByLead(leadId);
-        setActivities(data);
-      } catch (err) {
-        setError(err as Error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchActivities();
-  }, [leadId]);
-
-  return { activities, loading, error, refetch: () => leadId && activitiesAPI.getByLead(leadId).then(setActivities) };
+export function useLeadActivities(leadId: string | undefined, organizationId?: string) {
+  const constraints = useMemo(
+    () => (leadId ? buildActivitiesQuery({ leadId, organizationId }) : []),
+    [leadId, organizationId]
+  );
+  const { data, loading, error, refetch } = useFirestoreCollection<ActivityLog>('activities', constraints, { listen: true });
+  return { activities: data, loading, error, refetch };
 }
 
 export function useFolders(organizationId: string) {
   const { user, loading: authLoading } = useAuth();
-  const [folders, setFolders] = useState<Folder[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
 
-  useEffect(() => {
-    if (authLoading || !user || !organizationId) {
-      setLoading(false);
-      return;
-    }
+  const constraints = useMemo(
+    () => (organizationId ? [where('organizationId', '==', organizationId)] : []),
+    [organizationId]
+  );
 
-    const fetchFolders = async () => {
-      try {
-        setLoading(true);
-        const data = await foldersAPI.getAll(organizationId);
-        setFolders(data);
-      } catch (err) {
-        setError(err as Error);
-      } finally {
-        setLoading(false);
-      }
-    };
+  const shouldListen = Boolean(user && organizationId && !authLoading);
+  const { data, loading, error, refetch } = useFirestoreCollection<Folder>('folders', constraints, {
+    listen: shouldListen,
+  });
 
-    fetchFolders();
-  }, [organizationId, user, authLoading]);
+  if (!shouldListen) {
+    return { folders: [], loading: authLoading, error: null, refetch: () => Promise.resolve() };
+  }
 
-  return {
-    folders,
-    loading,
-    error,
-    refetch: () => (user ? foldersAPI.getAll(organizationId).then(setFolders) : Promise.resolve()),
-  };
+  return { folders: data, loading, error, refetch };
 }
 
 export function useUsers(organizationId: string) {
   const { user, loading: authLoading } = useAuth();
-  const [users, setUsers] = useState<User[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
+  const constraints = useMemo(
+    () => (organizationId ? [where('organizationId', '==', organizationId)] : []),
+    [organizationId]
+  );
 
-  useEffect(() => {
-    if (authLoading || !user || !organizationId) {
-      setLoading(false);
-      return;
-    }
+  const shouldListen = Boolean(user && organizationId && !authLoading);
+  const { data, loading, error, refetch } = useFirestoreCollection<User>('users', constraints, {
+    listen: shouldListen,
+  });
 
-    const fetchUsers = async () => {
-      try {
-        setLoading(true);
-        const data = await usersAPI.getAll(organizationId);
-        setUsers(data);
-      } catch (err) {
-        setError(err as Error);
-      } finally {
-        setLoading(false);
-      }
-    };
+  if (!shouldListen) {
+    return { users: [], loading: authLoading, error: null, refetch: () => Promise.resolve() };
+  }
 
-    fetchUsers();
-  }, [organizationId, user, authLoading]);
-
-  return {
-    users,
-    loading,
-    error,
-    refetch: () => (user ? usersAPI.getAll(organizationId).then(setUsers) : Promise.resolve()),
-  };
+  return { users: data, loading, error, refetch };
 }
 
-export function useLeadChat(leadId: string | undefined) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
+export function useLeadChat(leadId: string | undefined, organizationId?: string) {
+  const constraints = useMemo(
+    () =>
+      leadId
+        ? [
+            where('leadId', '==', leadId),
+            ...(organizationId ? [where('organizationId', '==', organizationId)] : []),
+            orderBy('createdAt', 'asc'),
+          ]
+        : [],
+    [leadId, organizationId]
+  );
+  const { data, loading, error, refetch } = useFirestoreCollection<ChatMessage>('chatMessages', constraints, {
+    listen: Boolean(leadId),
+  });
 
-  useEffect(() => {
-    if (!leadId) {
-      setLoading(false);
-      return;
-    }
-
-    const fetchMessages = async () => {
-      try {
-        setLoading(true);
-        const data = await chatAPI.getByLead(leadId);
-        const sorted = [...data].sort(
-          (a, b) => timestampToDate(a.createdAt).getTime() - timestampToDate(b.createdAt).getTime()
-        );
-        setMessages(sorted);
-      } catch (err) {
-        setError(err as Error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchMessages();
-  }, [leadId]);
-
-  return { messages, loading, error, refetch: () => leadId && chatAPI.getByLead(leadId).then(setMessages) };
+  return { messages: data, loading, error, refetch };
 }
 
-export function useLeadAssignments(leadId: string | undefined) {
-  const [assignments, setAssignments] = useState<LeadAssignment[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
+export function useLeadAssignments(leadId: string | undefined, organizationId?: string) {
+  const constraints = useMemo(
+    () =>
+      leadId
+        ? [
+            where('leadId', '==', leadId),
+            ...(organizationId ? [where('organizationId', '==', organizationId)] : []),
+          ]
+        : [],
+    [leadId, organizationId]
+  );
+  const { data, loading, error, refetch } = useFirestoreCollection<LeadAssignment>('leadAssignments', constraints, {
+    listen: Boolean(leadId),
+  });
 
-  useEffect(() => {
-    if (!leadId) {
-      setLoading(false);
-      return;
-    }
-
-    const fetchAssignments = async () => {
-      try {
-        setLoading(true);
-        const data = await assignmentsAPI.getByLead(leadId);
-        setAssignments(data);
-      } catch (err) {
-        setError(err as Error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchAssignments();
-  }, [leadId]);
-
-  return { assignments, loading, error, refetch: () => leadId && assignmentsAPI.getByLead(leadId).then(setAssignments) };
+  return { assignments: data, loading, error, refetch };
 }
 
-export function useOrganizationTasks(organizationId: string) {
+export function useOrganizationTasks(organizationId: string, opts?: { role?: UserRole; userId?: string }) {
   const { user, loading: authLoading } = useAuth();
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
+  const constraints = useMemo(() => buildTasksQuery({ organizationId }), [organizationId]);
+  const shouldListen = Boolean(user && organizationId && !authLoading);
+  const { data, loading, error, refetch } = useFirestoreCollection<Task>('tasks', constraints, {
+    listen: shouldListen,
+  });
 
-  useEffect(() => {
-    if (authLoading || !user || !organizationId) {
-      setLoading(false);
-      return;
+  if (!shouldListen) {
+    return { tasks: [], loading: authLoading, error: null, refetch: () => Promise.resolve() };
+  }
+
+  const tasks = useMemo(() => {
+    if (!opts?.role || opts.role === 'admin' || opts.role === 'superadmin') return data;
+    if (opts.role === 'member' && opts.userId) {
+      return data.filter((t) => t.assignedToId === opts.userId || t.createdById === opts.userId);
     }
+    return data;
+  }, [data, opts?.role, opts?.userId]);
 
-    const fetchTasks = async () => {
-      try {
-        setLoading(true);
-        const data = await tasksAPI.getByOrganization(organizationId);
-        const sorted = [...data].sort(
-          (a, b) => timestampToDate(a.createdAt).getTime() - timestampToDate(b.createdAt).getTime()
-        );
-        setTasks(sorted);
-      } catch (err) {
-        setError(err as Error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchTasks();
-  }, [organizationId, user, authLoading]);
-
-  return { tasks, loading, error, refetch: () => tasksAPI.getByOrganization(organizationId).then(setTasks) };
+  return { tasks, loading, error, refetch };
 }
 
 export function useOrganizationActivities(organizationId: string) {
   const { user, loading: authLoading } = useAuth();
-  const [activities, setActivities] = useState<ActivityLog[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
+  const constraints = useMemo(() => buildActivitiesQuery({ organizationId }), [organizationId]);
+  const shouldListen = Boolean(user && organizationId && !authLoading);
+  const { data, loading, error, refetch } = useFirestoreCollection<ActivityLog>('activities', constraints, {
+    listen: shouldListen,
+  });
 
-  useEffect(() => {
-    if (authLoading || !user || !organizationId) {
-      setLoading(false);
-      return;
-    }
+  if (!shouldListen) {
+    return { activities: [], loading: authLoading, error: null, refetch: () => Promise.resolve() };
+  }
 
-    const fetchActivities = async () => {
-      try {
-        setLoading(true);
-        const data = await activitiesAPI.getByOrganization(organizationId);
-        const sorted = [...data].sort(
-          (a, b) => timestampToDate(b.createdAt).getTime() - timestampToDate(a.createdAt).getTime()
-        );
-        setActivities(sorted);
-      } catch (err) {
-        setError(err as Error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchActivities();
-  }, [organizationId, user, authLoading]);
-
-  return { activities, loading, error, refetch: () => activitiesAPI.getByOrganization(organizationId).then(setActivities) };
+  return { activities: data, loading, error, refetch };
 }

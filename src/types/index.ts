@@ -1,6 +1,6 @@
 // Mocha Leads - Core Types
 
-export type UserRole = 'admin' | 'member' | 'observer';
+export type UserRole = 'superadmin' | 'admin' | 'member' | 'observer';
 
 export type LeadStatus = 
   | 'new' 
@@ -15,6 +15,7 @@ export type LeadStatus =
 export type LeadPriority = 'low' | 'medium' | 'high';
 
 export type TaskStatus = 'todo' | 'in_progress' | 'done';
+export type TaskReviewStatus = 'pending' | 'approved' | 'changes_requested';
 
 export interface Organization {
   id: string;
@@ -30,7 +31,11 @@ export interface User {
   bio?: string;
   avatar?: string;
   role: UserRole;
-  organizationId: string;
+  organizationId: string | null;
+  phone?: string;
+  invitationStatus?: 'pending' | 'accepted' | 'rejected';
+  invitedById?: string;
+  invitedByEmail?: string;
   createdAt: Date;
 }
 
@@ -95,6 +100,7 @@ export interface Lead {
 export interface LeadAssignment {
   id: string;
   leadId: string;
+  organizationId: string;
   userId: string;
   userName?: string;
   userAvatar?: string;
@@ -105,14 +111,19 @@ export interface LeadAssignment {
 export interface Task {
   id: string;
   leadId: string;
+  organizationId: string;
   assignedToId: string;
   assignedToName?: string;
+  createdById?: string;
+  createdByName?: string;
   title: string;
   description?: string;
   dueDate?: Date;
   status: TaskStatus;
   priority: LeadPriority;
   checklist?: TaskChecklistItem[];
+  reviewStatus?: TaskReviewStatus;
+  reviewNote?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -126,6 +137,7 @@ export interface TaskChecklistItem {
 export interface ChatMessage {
   id: string;
   leadId: string;
+  organizationId: string;
   senderId: string;
   senderName: string;
   senderAvatar?: string;
@@ -148,6 +160,7 @@ export interface Attachment {
 export interface ActivityLog {
   id: string;
   leadId: string;
+  organizationId: string;
   actorId: string;
   actorName: string;
   actionType: string;
@@ -160,12 +173,25 @@ export interface ActivityLog {
 export interface Notification {
   id: string;
   userId: string;
-  type: 'assignment' | 'task' | 'mention' | 'status_change' | 'due_soon';
+  organizationId: string;
+  type: 'assignment' | 'task' | 'mention' | 'status_change' | 'due_soon' | 'invite' | 'invite_accept' | 'invite_reject';
   title: string;
   message: string;
   leadId?: string;
   read: boolean;
   createdAt: Date;
+}
+
+export interface OrganizationInvite {
+  id: string;
+  email: string;
+  organizationId: string;
+  organizationName?: string;
+  invitedById: string;
+  invitedByEmail?: string;
+  status: 'pending' | 'accepted' | 'rejected' | 'expired';
+  createdAt: Date;
+  respondedAt?: Date;
 }
 
 export interface TaskTemplate {

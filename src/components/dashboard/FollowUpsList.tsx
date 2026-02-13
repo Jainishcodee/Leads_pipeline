@@ -5,6 +5,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { StatusBadge } from '@/components/leads/StatusBadge';
 import { cn } from '@/lib/utils';
 import { timestampToDate } from '@/lib/firestore';
+import { useAuth } from '@/auth/AuthContext';
 import type { Lead } from '@/types';
 import { format, isToday, isTomorrow, isPast } from 'date-fns';
 
@@ -15,6 +16,8 @@ interface FollowUpsListProps {
 
 export function FollowUpsList({ leads, className }: FollowUpsListProps) {
   const navigate = useNavigate();
+  const { profile } = useAuth();
+  const basePath = profile?.role === 'admin' ? '/admin' : '/dashboard';
 
   const leadsWithFollowUp = leads
     .filter(lead => lead.nextFollowUpDate && lead.status !== 'converted' && lead.status !== 'cancelled')
@@ -57,7 +60,7 @@ export function FollowUpsList({ leads, className }: FollowUpsListProps) {
               <div 
                 key={lead.id}
                 className="p-4 hover:bg-muted/30 transition-colors cursor-pointer"
-                onClick={() => navigate(`/dashboard/leads/${lead.id}`)}
+                onClick={() => navigate(`${basePath}/leads/${lead.id}`)}
               >
                 <div className="flex items-center gap-3">
                   <Avatar className="w-10 h-10">

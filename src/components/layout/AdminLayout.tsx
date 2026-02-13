@@ -18,8 +18,8 @@ export function AdminLayout() {
   const [createLeadOpen, setCreateLeadOpen] = useState(false);
   const [addTeamMemberOpen, setAddTeamMemberOpen] = useState(false);
   const isMobile = useIsMobile();
-  const { user } = useAuth();
-  const organizationId = 'org_1';
+  const { profile } = useAuth();
+  const organizationId = profile?.organizationId || '';
   const { users, refetch: refetchUsers } = useUsers(organizationId);
   const location = useLocation();
 
@@ -56,6 +56,16 @@ export function AdminLayout() {
       <CreateLeadModal
         open={createLeadOpen}
         onOpenChange={setCreateLeadOpen}
+      />
+
+      {/* Add Team Member Modal */}
+      <AddTeamMemberModal
+        open={addTeamMemberOpen}
+        onOpenChange={setAddTeamMemberOpen}
+        availableUsers={users}
+        currentTeamMembers={users.filter(u => u.role === 'member')}
+        organizationId={organizationId}
+        onSuccess={() => refetchUsers()}
       />
     </div>
   );

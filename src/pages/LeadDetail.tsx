@@ -19,7 +19,8 @@ import {
   DollarSign,
   FileText,
   Users,
-  Sparkles
+  Sparkles,
+  Trash2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -49,22 +50,24 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { StatusBadge } from '@/components/leads/StatusBadge';
 import { PriorityBadge } from '@/components/leads/PriorityBadge';
+import { CreateLeadModal } from '@/components/leads/CreateLeadModal';
 import { ChatPanel } from '@/components/chat/ChatPanel';
 import { format, formatDistanceToNow } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import type { ActivityLog } from '@/types';
 import { useLead, useLeadTasks, useLeadActivities, useLeadAssignments, useLeadChat, useUsers } from '@/hooks/useFirebaseData';
-import { leadsAPI, tasksAPI, activitiesAPI, assignmentsAPI, chatAPI } from '@/lib/api';
+import { leadsAPI, tasksAPI, activitiesAPI, assignmentsAPI, chatAPI, notificationsAPI } from '@/lib/api';
 import { useAuth } from '@/auth/AuthContext';
 import { timestampToDate } from '@/lib/firestore';
 
 export default function LeadDetail() {
   const { leadId } = useParams();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const [chatOpen, setChatOpen] = useState(false);
   const [editMode, setEditMode] = useState(false);
+  const [editLeadModalOpen, setEditLeadModalOpen] = useState(false);
   const [showConvertDialog, setShowConvertDialog] = useState(false);
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [cancellationReason, setCancellationReason] = useState('');  
@@ -72,20 +75,22 @@ export default function LeadDetail() {
   const [showFollowUpDialog, setShowFollowUpDialog] = useState(false);
   const [showTaskDialog, setShowTaskDialog] = useState(false);
   const [showAssignDialog, setShowAssignDialog] = useState(false);
+  const [selectedTaskAssignee, setSelectedTaskAssignee] = useState('');
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskDescription, setNewTaskDescription] = useState('');
   const [newTaskDueDate, setNewTaskDueDate] = useState('');
   const [newTaskPriority, setNewTaskPriority] = useState<'low' | 'medium' | 'high'>('medium');
   const [selectedAssignee, setSelectedAssignee] = useState('');
   const [assigneeRole, setAssigneeRole] = useState('');  
+  const [selectedMemberFilter, setSelectedMemberFilter] = useState<string>('all');
   
   const { lead, loading: leadLoading, refetch: refetchLead } = useLead(leadId);
-  const { tasks, loading: tasksLoading, refetch: refetchTasks } = useLeadTasks(leadId);
-  const { activities, loading: activitiesLoading, refetch: refetchActivities } = useLeadActivities(leadId);
-  const { assignments, loading: assignmentsLoading, refetch: refetchAssignments } = useLeadAssignments(leadId);
-  const organizationId = 'org_1';
+  const organizationId = lead?.organizationId || profile?.organizationId || '';
+  const { tasks, loading: tasksLoading, refetch: refetchTasks } = useLeadTasks(leadId, organizationId);
+  const { activities, loading: activitiesLoading, refetch: refetchActivities } = useLeadActivities(leadId, organizationId);
+  const { assignments, loading: assignmentsLoading, refetch: refetchAssignments } = useLeadAssignments(leadId, organizationId);
   const { users, loading: usersLoading } = useUsers(organizationId);
-  const { messages, refetch: refetchMessages } = useLeadChat(leadId);
+  const { messages, refetch: refetchMessages } = useLeadChat(leadId, organizationId);
   const [attachments, setAttachments] = useState<Array<{
     id: string;
     name: string;
@@ -106,14 +111,32 @@ export default function LeadDetail() {
   const highlightTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const attachmentsRef = useRef(attachments);
+  const [taskReviewNotes, setTaskReviewNotes] = useState<Record<string, string>>({});
 
   const toDate = (value: unknown) => (value ? timestampToDate(value) : null);
   
   const userById = new Map(users.map((member) => [member.id, member]));
   const teamOptions = users;
+  const isAdmin = profile?.role === 'admin';
+  
+  // Filter tasks, activities, and attachments based on selected member
+  const filteredTasks = selectedMemberFilter === 'all' 
+    ? tasks 
+    : tasks.filter(task => task.assignedToId === selectedMemberFilter);
+    
+  const filteredActivities = selectedMemberFilter === 'all'
+    ? activities
+    : activities.filter(activity => activity.actorId === selectedMemberFilter);
+    
+  const filteredAttachments = selectedMemberFilter === 'all'
+    ? attachments
+    : attachments; // File uploads can be filtered if you store uploaderId
 
-  const getTaskStatusLabel = (status: string) => {
-    if (status === 'done') return 'Completed';
+  const getTaskStatusLabel = (status: string, reviewStatus?: string | null) => {
+    if (status === 'done') {
+      if (reviewStatus === 'pending') return 'Awaiting Review';
+      return 'Completed';
+    }
     if (status === 'in_progress') return 'Ongoing';
     return 'Pending';
   };
@@ -124,13 +147,36 @@ export default function LeadDetail() {
     if (!task) return;
 
     const oldStatus = task.status;
-    const label = getTaskStatusLabel(newStatus);
+    const isReviewRequired =
+      newStatus === 'done' &&
+      Boolean(task.createdById) &&
+      task.createdById !== task.assignedToId;
+    const nextReviewStatus = newStatus === 'done' ? (isReviewRequired ? 'pending' : 'approved') : null;
+    const label = getTaskStatusLabel(newStatus, nextReviewStatus);
+    const oldLabel = getTaskStatusLabel(oldStatus, task.reviewStatus || null);
+    const updatePayload: Record<string, unknown> = {
+      status: newStatus,
+      reviewStatus: nextReviewStatus,
+      reviewNote: newStatus === 'done' ? task.reviewNote || null : null,
+    };
     
     // Update the task status
-    tasksAPI.update(taskId, { status: newStatus as any })
-      .then(() => {
+    tasksAPI.update(taskId, updatePayload as any)
+      .then(async () => {
         refetchTasks();
         toast.success(`Task marked as ${label}`);
+
+        if (leadId && user && isReviewRequired && task.createdById) {
+          await notificationsAPI.create({
+            userId: task.createdById,
+            organizationId,
+            type: 'task',
+            title: 'Task ready for review',
+            message: `${user.email?.split('@')[0] || 'A team member'} completed "${taskTitle}". Review required.`,
+            leadId,
+            read: false,
+          });
+        }
         
         // Log activity
         if (leadId && user) {
@@ -139,8 +185,8 @@ export default function LeadDetail() {
             user.uid,
             user.email?.split('@')[0] || 'User',
             'task_update',
-            `Updated task "${taskTitle}" status from ${getTaskStatusLabel(oldStatus)} to ${label}`,
-            'org_1',
+            `Updated task "${taskTitle}" status from ${oldLabel} to ${label}`,
+            organizationId,
             { taskId, oldStatus, newStatus }
           ).then(() => refetchActivities());
         }
@@ -166,7 +212,7 @@ export default function LeadDetail() {
         user.email?.split('@')[0] || 'User',
         'status_change',
         'Converted lead to customer',
-        'org_1',
+        organizationId,
         { newStatus: 'converted' }
       );
       
@@ -196,7 +242,7 @@ export default function LeadDetail() {
         user.email?.split('@')[0] || 'User',
         'status_change',
         `Cancelled lead: ${cancellationReason}`,
-        'org_1',
+        organizationId,
         { newStatus: 'cancelled', reason: cancellationReason }
       );
       
@@ -225,7 +271,7 @@ export default function LeadDetail() {
         user.email?.split('@')[0] || 'User',
         'follow_up_scheduled',
         `Scheduled follow-up for ${format(new Date(followUpDate), 'MMM d, yyyy')}`,
-        'org_1',
+        organizationId,
         { followUpDate }
       );
       
@@ -244,10 +290,15 @@ export default function LeadDetail() {
     if (!leadId || !user || !newTaskTitle) return;
     
     try {
+      const assignedUserId = selectedTaskAssignee || user.uid;
+      const assignedUser = userById.get(assignedUserId);
       await tasksAPI.create({
         leadId,
-        assignedToId: user.uid,
-        assignedToName: user.email?.split('@')[0] || 'Unknown',
+        organizationId,
+        assignedToId: assignedUserId,
+        assignedToName: assignedUser?.name || user.email?.split('@')[0] || 'Unknown',
+        createdById: user.uid,
+        createdByName: user.email?.split('@')[0] || 'User',
         title: newTaskTitle,
         description: newTaskDescription || null,
         dueDate: newTaskDueDate ? new Date(newTaskDueDate) : null,
@@ -255,6 +306,28 @@ export default function LeadDetail() {
         priority: newTaskPriority,
         checklist: [],
       });
+
+      const alreadyAssigned = assignments.some((assignment) => assignment.userId === assignedUserId);
+      if (!alreadyAssigned && leadId) {
+        await assignmentsAPI.create({
+          leadId,
+          organizationId,
+          userId: assignedUserId,
+          userName: assignedUser?.name || 'Unknown',
+          roleInLead: 'Task Assignee',
+          createdAt: new Date(),
+        });
+        await activitiesAPI.logActivity(
+          leadId,
+          user.uid,
+          user.email?.split('@')[0] || 'User',
+          'team_assigned',
+          `Assigned ${assignedUser?.name || 'team member'} as Task Assignee`,
+          organizationId,
+          { assigneeId: assignedUserId, role: 'Task Assignee' }
+        );
+        refetchAssignments();
+      }
       
       await activitiesAPI.logActivity(
         leadId,
@@ -262,7 +335,7 @@ export default function LeadDetail() {
         user.email?.split('@')[0] || 'User',
         'task_created',
         `Created task: ${newTaskTitle}`,
-        'org_1',
+        organizationId,
         { taskTitle: newTaskTitle }
       );
       
@@ -272,11 +345,103 @@ export default function LeadDetail() {
       setNewTaskDescription('');
       setNewTaskDueDate('');
       setNewTaskPriority('medium');
+      setSelectedTaskAssignee(user.uid);
       refetchTasks();
       refetchActivities();
     } catch (error) {
       console.error('Error creating task:', error);
       toast.error('Failed to create task');
+    }
+  };
+
+  const handleDeleteTask = async (taskId: string, taskTitle: string) => {
+    if (!leadId || !user) return;
+    const confirmed = window.confirm(`Delete task "${taskTitle}"? This cannot be undone.`);
+    if (!confirmed) return;
+
+    try {
+      await tasksAPI.delete(taskId);
+      toast.success('Task deleted');
+      await activitiesAPI.logActivity(
+        leadId,
+        user.uid,
+        user.email?.split('@')[0] || 'User',
+        'task_deleted',
+        `Deleted task "${taskTitle}"`,
+        organizationId,
+        { taskId }
+      );
+      refetchTasks();
+      refetchActivities();
+    } catch (error) {
+      console.error('Error deleting task:', error);
+      toast.error('Failed to delete task');
+    }
+  };
+
+  const handleApproveTaskReview = async (taskId: string, taskTitle: string) => {
+    if (!leadId || !user) return;
+
+    try {
+      await tasksAPI.update(taskId, { reviewStatus: 'approved' } as any);
+      toast.success('Task approved');
+      await activitiesAPI.logActivity(
+        leadId,
+        user.uid,
+        user.email?.split('@')[0] || 'User',
+        'task_reviewed',
+        `Approved task "${taskTitle}"`,
+        organizationId,
+        { taskId }
+      );
+      setTaskReviewNotes((prev) => ({ ...prev, [taskId]: '' }));
+      refetchTasks();
+      refetchActivities();
+    } catch (error) {
+      console.error('Error approving task:', error);
+      toast.error('Failed to approve task');
+    }
+  };
+
+  const handleRequestTaskChanges = async (taskId: string, taskTitle: string, assignedToId: string) => {
+    if (!leadId || !user) return;
+    const note = taskReviewNotes[taskId]?.trim();
+    if (!note) {
+      toast.error('Please add a note for the changes needed.');
+      return;
+    }
+
+    try {
+      await tasksAPI.update(taskId, {
+        status: 'todo',
+        reviewStatus: 'changes_requested',
+        reviewNote: note,
+      } as any);
+      await notificationsAPI.create({
+        userId: assignedToId,
+        organizationId,
+        type: 'task',
+        title: 'Changes needed on task',
+        message: `Task "${taskTitle}" needs changes: ${note}`,
+        leadId,
+        read: false,
+      });
+      await activitiesAPI.logActivity(
+        leadId,
+        user.uid,
+        user.email?.split('@')[0] || 'User',
+        'task_reviewed',
+        `Requested changes on task "${taskTitle}"`,
+        organizationId,
+        { taskId, note }
+      );
+      toast.success('Changes requested');
+      setTaskReviewNotes((prev) => ({ ...prev, [taskId]: '' }));
+      refetchTasks();
+      refetchActivities();
+    } catch (error) {
+      console.error('Error requesting task changes:', error);
+      toast.error('Failed to request changes');
     }
   };
 
@@ -289,9 +454,11 @@ export default function LeadDetail() {
       
       await assignmentsAPI.create({
         leadId,
+        organizationId,
         userId: selectedAssignee,
         userName: assignee.name,
         roleInLead: assigneeRole,
+        createdAt: new Date(),
       });
       
       await activitiesAPI.logActivity(
@@ -300,7 +467,7 @@ export default function LeadDetail() {
         user.email?.split('@')[0] || 'User',
         'team_assigned',
         `Assigned ${assignee.name} as ${assigneeRole}`,
-        'org_1',
+        organizationId,
         { assigneeId: selectedAssignee, assigneeName: assignee.name, role: assigneeRole }
       );
       
@@ -355,6 +522,12 @@ export default function LeadDetail() {
   useEffect(() => {
     attachmentsRef.current = attachments;
   }, [attachments]);
+
+  useEffect(() => {
+    if (showTaskDialog && user?.uid && !selectedTaskAssignee) {
+      setSelectedTaskAssignee(user.uid);
+    }
+  }, [showTaskDialog, user?.uid, selectedTaskAssignee]);
 
   useEffect(() => {
     return () => {
@@ -463,7 +636,7 @@ export default function LeadDetail() {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => setEditMode(true)}>
+                  <DropdownMenuItem onClick={() => setEditLeadModalOpen(true)}>
                     <Edit className="w-4 h-4 mr-2" />
                     Edit Lead
                   </DropdownMenuItem>
@@ -689,16 +862,32 @@ export default function LeadDetail() {
             {/* Right: Tasks & Activity */}
             <div className="lg:col-span-2">
               <Tabs defaultValue="tasks" className="w-full">
-                <TabsList className="w-full justify-start bg-muted/50 p-1">
-                  <TabsTrigger value="tasks" className="flex-1 max-w-32">Tasks</TabsTrigger>
-                  <TabsTrigger value="activity" className="flex-1 max-w-32">Activity</TabsTrigger>
-                  <TabsTrigger value="notes" className="flex-1 max-w-32">Notes</TabsTrigger>
-                  <TabsTrigger value="files" className="flex-1 max-w-32">Files</TabsTrigger>
-                </TabsList>
+                <div className="flex items-center justify-between mb-4">
+                  <TabsList className="bg-muted/50 p-1">
+                    <TabsTrigger value="tasks" className="flex-1 max-w-32">Tasks</TabsTrigger>
+                    <TabsTrigger value="activity" className="flex-1 max-w-32">Activity</TabsTrigger>
+                    <TabsTrigger value="notes" className="flex-1 max-w-32">Notes</TabsTrigger>
+                    <TabsTrigger value="files" className="flex-1 max-w-32">Files</TabsTrigger>
+                  </TabsList>
+                  
+                  {isAdmin && (
+                    <Select value={selectedMemberFilter} onValueChange={setSelectedMemberFilter}>
+                      <SelectTrigger className="w-[180px]">
+                        <SelectValue placeholder="All Members" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Members</SelectItem>
+                        {users.map(user => (
+                          <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
 
                 <TabsContent value="tasks" className="mt-4">
                   <div className="space-y-3">
-                    {tasks.length === 0 ? (
+                    {filteredTasks.length === 0 ? (
                       <div className="card-premium p-8 text-center">
                         <p className="text-muted-foreground">No tasks yet</p>
                         <Button className="btn-mocha mt-4">
@@ -707,90 +896,144 @@ export default function LeadDetail() {
                         </Button>
                       </div>
                     ) : (
-                      tasks.map((task) => (
-                        <div key={task.id} className="card-premium p-4">
-                          <div className="flex items-start gap-3">
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-start justify-between gap-2">
-                                <p className={cn(
-                                  'font-medium',
-                                  task.status === 'done' && 'line-through text-muted-foreground'
-                                )}>
-                                  {task.title}
-                                </p>
-                                <div className="flex items-center gap-2">
-                                  <Select
-                                    value={task.status}
-                                    onValueChange={(value) => {
-                                      handleTaskStatusChange(task.id, value, task.title);
-                                    }}
-                                  >
-                                    <SelectTrigger className="h-7 text-xs">
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="todo">Pending</SelectItem>
-                                      <SelectItem value="in_progress">Ongoing</SelectItem>
-                                      <SelectItem value="done">Completed</SelectItem>
-                                    </SelectContent>
-                                  </Select>
-                                  <PriorityBadge priority={task.priority} />
+                      filteredTasks.map((task) => {
+                        const isReviewPending = task.status === 'done' && task.reviewStatus === 'pending';
+                        const isFinalized = task.status === 'done' && !isReviewPending;
+                        const canReview = isReviewPending && task.createdById === user?.uid;
+
+                        return (
+                          <div key={task.id} className="card-premium p-4">
+                            <div className="flex items-start gap-3">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <p className={cn(
+                                      'font-medium',
+                                      isFinalized && 'line-through text-muted-foreground'
+                                    )}>
+                                      {task.title}
+                                    </p>
+                                    {isReviewPending && (
+                                      <p className="text-xs text-amber-700 mt-1">Awaiting review</p>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <Select
+                                      value={task.status}
+                                      onValueChange={(value) => {
+                                        handleTaskStatusChange(task.id, value, task.title);
+                                      }}
+                                    >
+                                      <SelectTrigger className="h-7 text-xs">
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="todo">Pending</SelectItem>
+                                        <SelectItem value="in_progress">Ongoing</SelectItem>
+                                        <SelectItem value="done">Completed</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                    <PriorityBadge priority={task.priority} />
+                                    {isAdmin && (
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-7 w-7 text-destructive"
+                                        onClick={() => handleDeleteTask(task.id, task.title)}
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </Button>
+                                    )}
+                                  </div>
                                 </div>
-                              </div>
-                              {task.description && (
-                                <p className="text-sm text-muted-foreground mt-1">
-                                  {task.description}
-                                </p>
-                              )}
-                              <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
-                                <span className="flex items-center gap-1">
-                                  <User className="w-3 h-3" />
-                                  {userById.get(task.assignedToId)?.name || task.assignedToName || 'Unassigned'}
-                                  {userById.get(task.assignedToId)?.role && (
-                                    <span className="text-[10px] uppercase tracking-wide">
-                                      · {userById.get(task.assignedToId)?.role}
+                                {task.description && (
+                                  <p className="text-sm text-muted-foreground mt-1">
+                                    {task.description}
+                                  </p>
+                                )}
+                                <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+                                  <span className="flex items-center gap-1">
+                                    <User className="w-3 h-3" />
+                                    {userById.get(task.assignedToId)?.name || task.assignedToName || 'Unassigned'}
+                                    {userById.get(task.assignedToId)?.role && (
+                                      <span className="text-[10px] uppercase tracking-wide">
+                                        · {userById.get(task.assignedToId)?.role}
+                                      </span>
+                                    )}
+                                  </span>
+                                  {task.dueDate && (
+                                    <span className="flex items-center gap-1">
+                                      <Calendar className="w-3 h-3" />
+                                      {format(timestampToDate(task.dueDate), 'MMM d')}
                                     </span>
                                   )}
-                                </span>
-                                {task.dueDate && (
-                                  <span className="flex items-center gap-1">
-                                    <Calendar className="w-3 h-3" />
-                                    {format(timestampToDate(task.dueDate), 'MMM d')}
-                                  </span>
+                                </div>
+
+                                {canReview && (
+                                  <div className="mt-3 space-y-2">
+                                    <Label htmlFor={`review-note-${task.id}`} className="text-xs text-muted-foreground">
+                                      Review note (required for changes)
+                                    </Label>
+                                    <Textarea
+                                      id={`review-note-${task.id}`}
+                                      value={taskReviewNotes[task.id] || ''}
+                                      onChange={(e) =>
+                                        setTaskReviewNotes((prev) => ({ ...prev, [task.id]: e.target.value }))
+                                      }
+                                      placeholder="Add review notes..."
+                                      className="min-h-[70px]"
+                                    />
+                                    <div className="flex items-center gap-2">
+                                      <Button
+                                        size="sm"
+                                        onClick={() => handleApproveTaskReview(task.id, task.title)}
+                                      >
+                                        All good 👍
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="destructive"
+                                        onClick={() => handleRequestTaskChanges(task.id, task.title, task.assignedToId)}
+                                      >
+                                        Changes needed
+                                      </Button>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {task.checklist && task.checklist.length > 0 && (
+                                  <div className="mt-3 space-y-1.5">
+                                    {task.checklist.map((item) => (
+                                      <div key={item.id} className="flex items-center gap-2 text-sm">
+                                        <div className={cn(
+                                          'w-4 h-4 rounded border flex items-center justify-center',
+                                          item.completed 
+                                            ? 'bg-mocha-500 border-mocha-500' 
+                                            : 'border-mocha-300'
+                                        )}>
+                                          {item.completed && (
+                                            <CheckCircle className="w-3 h-3 text-white" />
+                                          )}
+                                        </div>
+                                        <span className={item.completed ? 'line-through text-muted-foreground' : ''}>
+                                          {item.text}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
                                 )}
                               </div>
-                              {task.checklist && task.checklist.length > 0 && (
-                                <div className="mt-3 space-y-1.5">
-                                  {task.checklist.map((item) => (
-                                    <div key={item.id} className="flex items-center gap-2 text-sm">
-                                      <div className={cn(
-                                        'w-4 h-4 rounded border flex items-center justify-center',
-                                        item.completed 
-                                          ? 'bg-mocha-500 border-mocha-500' 
-                                          : 'border-mocha-300'
-                                      )}>
-                                        {item.completed && (
-                                          <CheckCircle className="w-3 h-3 text-white" />
-                                        )}
-                                      </div>
-                                      <span className={item.completed ? 'line-through text-muted-foreground' : ''}>
-                                        {item.text}
-                                      </span>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
                             </div>
                           </div>
-                        </div>
-                      ))
+                        );
+                      })
                     )}
                   </div>
                 </TabsContent>
 
                 <TabsContent value="activity" className="mt-4">
                   <div className="card-premium p-4">
-                    {activities.length === 0 ? (
+                    {filteredActivities.length === 0 ? (
                       <div className="text-center py-8">
                         <Clock className="w-10 h-10 mx-auto text-muted-foreground/50" />
                         <p className="text-muted-foreground mt-2">No activities yet</p>
@@ -812,7 +1055,7 @@ export default function LeadDetail() {
                         )}
                         
                         <div className="space-y-6 relative z-10">
-                          {activities.map((activity, index) => (
+                          {filteredActivities.map((activity, index) => (
                             <div 
                               key={activity.id} 
                               className="relative pl-10 group"
@@ -885,13 +1128,13 @@ export default function LeadDetail() {
                       </div>
                     </div>
 
-                    {attachments.length === 0 ? (
+                    {filteredAttachments.length === 0 ? (
                       <div className="card-premium p-8 text-center">
                         <p className="text-muted-foreground">No files attached</p>
                       </div>
                     ) : (
                       <div className="space-y-3">
-                        {attachments.map((file) => (
+                        {filteredAttachments.map((file) => (
                           <div key={file.id} className="card-premium p-4">
                             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                               <div className="min-w-0">
@@ -940,6 +1183,7 @@ export default function LeadDetail() {
                   senderId: user.uid,
                   senderName: user.displayName || user.email?.split('@')[0] || 'User',
                   message: msg,
+                  organizationId: lead?.organizationId || profile?.organizationId || '',
                 });
                 await refetchMessages();
               } catch (error) {
@@ -1095,7 +1339,6 @@ export default function LeadDetail() {
           </div>
         </DialogContent>
       </Dialog>
-
       {/* Create Task Dialog */}
       <Dialog open={showTaskDialog} onOpenChange={setShowTaskDialog}>
         <DialogContent>
@@ -1121,6 +1364,27 @@ export default function LeadDetail() {
                 placeholder="Add task details..."
                 className="min-h-[80px]"
               />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="task-assignee">Assign To *</Label>
+              <Select value={selectedTaskAssignee} onValueChange={setSelectedTaskAssignee}>
+                <SelectTrigger id="task-assignee">
+                  <SelectValue placeholder="Select a team member" />
+                </SelectTrigger>
+                <SelectContent>
+                  {usersLoading ? (
+                    <SelectItem value="loading" disabled>
+                      Loading team...
+                    </SelectItem>
+                  ) : (
+                    users.map((member) => (
+                      <SelectItem key={member.id} value={member.id}>
+                        {member.name} ({member.email})
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -1153,7 +1417,7 @@ export default function LeadDetail() {
               </Button>
               <Button 
                 onClick={handleCreateTask}
-                disabled={!newTaskTitle}
+                disabled={!newTaskTitle || !selectedTaskAssignee}
               >
                 Create Task
               </Button>
@@ -1213,6 +1477,17 @@ export default function LeadDetail() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Edit Lead Modal */}
+      <CreateLeadModal
+        open={editLeadModalOpen}
+        onOpenChange={setEditLeadModalOpen}
+        editingLead={lead}
+        onSuccess={() => {
+          setEditLeadModalOpen(false);
+          refetchLead();
+        }}
+      />
     </div>
   );
 }

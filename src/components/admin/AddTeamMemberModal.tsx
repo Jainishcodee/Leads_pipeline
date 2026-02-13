@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from '@/auth/AuthContext';
-import { usersAPI } from '@/lib/api';
+import { invitesAPI, notificationsAPI, usersAPI } from '@/lib/api';
+import { getDocument } from '@/lib/firestore';
 import { toast } from 'sonner';
 import {
   Dialog,
@@ -25,6 +26,7 @@ interface AddTeamMemberModalProps {
   onSuccess?: () => void;
   availableUsers: User[];
   currentTeamMembers: User[];
+  organizationId: string;
 }
 
 export function AddTeamMemberModal({
@@ -33,17 +35,45 @@ export function AddTeamMemberModal({
   onSuccess,
   availableUsers,
   currentTeamMembers,
+  organizationId,
 }: AddTeamMemberModalProps) {
-  const { user: authUser } = useAuth();
+  const { user: authUser, profile } = useAuth();
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<User[]>(availableUsers);
+  const [searchLoading, setSearchLoading] = useState(false);
   const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteLoading, setInviteLoading] = useState(false);
+  const [organizationName, setOrganizationName] = useState<string>('your organization');
+
+  useEffect(() => {
+    if (open) {
+      setSearchResults(availableUsers);
+    }
+  }, [open, availableUsers]);
+
+  useEffect(() => {
+    const loadOrg = async () => {
+      if (!organizationId) return;
+      try {
+        const org = await getDocument<{ name?: string }>('organizations', organizationId);
+        if (org?.name) {
+          setOrganizationName(org.name);
+        }
+      } catch (err) {
+        console.error('Failed to load organization name', err);
+      }
+    };
+    loadOrg();
+  }, [organizationId]);
 
   const currentTeamMemberIds = currentTeamMembers.map(u => u.id);
-  const nonTeamUsers = availableUsers.filter(
-    u => !currentTeamMemberIds.includes(u.id) && u.role !== 'admin'
+  const nonTeamUsers = searchResults.filter(
+    u => !currentTeamMemberIds.includes(u.id)
+      && u.role !== 'admin'
+      && u.organizationId == null
+      && u.id !== authUser?.uid
   );
 
   const filteredUsers = nonTeamUsers.filter(u =>
@@ -51,19 +81,74 @@ export function AddTeamMemberModal({
     u.email.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const handleSearchUsers = async () => {
+    if (!searchQuery.trim()) {
+      toast.error('Please enter a name or email to search');
+      return;
+    }
+
+    try {
+      setSearchLoading(true);
+      const users = await usersAPI.getUnassigned();
+      const query = searchQuery.trim().toLowerCase();
+      const matched = users.filter((u) =>
+        u.name.toLowerCase().includes(query) || u.email.toLowerCase().includes(query)
+      );
+      setSearchResults(matched);
+      if (matched.length === 0) {
+        toast.info('No users matched that search');
+      }
+    } catch (error) {
+      console.error('Error searching users:', error);
+      toast.error('Failed to search users');
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
   const handleAddUsers = async () => {
     if (selectedUsers.length === 0) {
       toast.error('Please select at least one user to add');
       return;
     }
 
+    if (!organizationId) {
+      toast.error('No organization found for this account');
+      return;
+    }
+
     try {
       setLoading(true);
-      
-      // In a real implementation, you would call an API to update user roles
-      // For now, we'll just show a success message
+
+      const userById = new Map(searchResults.map((u) => [u.id, u]));
+
+      await Promise.all(
+        selectedUsers.map(async (userId) => {
+          const targetUser = userById.get(userId);
+          if (!targetUser) {
+            throw new Error('Selected user not found in search results');
+          }
+          if (targetUser.organizationId) {
+            throw new Error(`${targetUser.email} already belongs to an organization`);
+          }
+          await usersAPI.update(userId, {
+            organizationId,
+            role: 'member',
+          });
+
+          await notificationsAPI.create({
+            userId,
+            organizationId,
+            type: 'invite_accept',
+            title: 'You were added to the organization',
+            message: `An admin added you to ${organizationName}. You now have member access.`,
+            read: false,
+          });
+        })
+      );
+
       toast.success(`Added ${selectedUsers.length} user(s) to the team`);
-      
+
       setSelectedUsers([]);
       onOpenChange(false);
       onSuccess?.();
@@ -81,6 +166,11 @@ export function AddTeamMemberModal({
       return;
     }
 
+    if (!organizationId || !authUser) {
+      toast.error('Missing organization or user context');
+      return;
+    }
+
     // Basic email validation
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(inviteEmail)) {
@@ -90,11 +180,26 @@ export function AddTeamMemberModal({
 
     try {
       setInviteLoading(true);
-      
-      // In a real implementation, you would send an invitation email
-      // For now, we'll just show a success message
-      toast.success(`Invitation sent to ${inviteEmail}`);
-      
+
+      const normalizedEmail = inviteEmail.trim().toLowerCase();
+
+      await invitesAPI.create({
+        email: normalizedEmail,
+        organizationId,
+        organizationName,
+        invitedById: authUser.uid,
+        invitedByEmail: profile?.email,
+      });
+
+      // Optional: open a mail client so the admin can send a manual invite message
+      const subject = encodeURIComponent('Invitation to join our team');
+      const body = encodeURIComponent(
+        `Hi,\n\nI would like to invite you to join our organization in the Mocha pipeline workspace. After signing up with this email, you can accept the invite from inside the app.\n\nThanks!`
+      );
+      window.open(`mailto:${normalizedEmail}?subject=${subject}&body=${body}`, '_blank');
+
+      toast.success(`Invitation sent to ${normalizedEmail}`);
+
       setInviteEmail('');
       onOpenChange(false);
       onSuccess?.();
@@ -127,13 +232,26 @@ export function AddTeamMemberModal({
             {/* Search Users */}
             <div className="space-y-2">
               <Label htmlFor="search">Search Users</Label>
-              <Input
-                id="search"
-                placeholder="Search by name or email..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="h-10"
-              />
+              <div className="flex gap-2">
+                <Input
+                  id="search"
+                  placeholder="Search by name or email..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="h-10"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleSearchUsers}
+                  disabled={searchLoading}
+                >
+                  {searchLoading ? 'Searching...' : 'Search'}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Only users not linked to any organization will appear.
+              </p>
             </div>
 
             {/* Users List */}

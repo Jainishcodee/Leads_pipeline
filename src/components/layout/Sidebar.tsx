@@ -13,11 +13,12 @@ import {
   MessageSquare
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { mockOrganization, currentUser } from '@/data/mockData';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/auth/AuthContext';
 import { useFolders } from '@/hooks/useFirebaseData';
+import { useFirestoreDoc } from '@/lib/useFirestore';
 import { CreateFolderModal } from '@/components/folders/CreateFolderModal';
+import { BroadcastMessages } from '@/components/admin/BroadcastMessages';
 import {
   Collapsible,
   CollapsibleContent,
@@ -42,16 +43,28 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
   const navigate = useNavigate();
   const [foldersOpen, setFoldersOpen] = useState(true);
   const [createFolderOpen, setCreateFolderOpen] = useState(false);
-  const { user, signOut } = useAuth();
-  const organizationId = 'org_1';
+  const [broadcastOpen, setBroadcastOpen] = useState(false);
+  const { user, profile, signOut } = useAuth();
+  const organizationId = profile?.organizationId || '';
   const { folders, loading: foldersLoading, refetch: refetchFolders } = useFolders(organizationId);
+  const { data: organization } = useFirestoreDoc<{ id: string; name?: string }>(
+    'organizations',
+    organizationId || null,
+    { listen: true }
+  );
 
   const isActive = (path: string) => location.pathname === path;
   const isFolderActive = (folderId: string) => 
-    location.pathname === `/dashboard/folders/${folderId}`;
+    location.pathname === `${basePath}/folders/${folderId}`;
 
-  const displayName = user?.displayName || user?.email?.split('@')[0] || currentUser.name;
-  const displayMeta = user?.email || currentUser.role;
+  const displayName = profile?.name || user?.displayName || user?.email?.split('@')[0] || 'User';
+  const displayMeta = profile?.email || user?.email || '';
+  const organizationLabel = organization?.name || 'No organization';
+
+  const basePath = profile?.role === 'admin' || profile?.role === 'superadmin' ? '/admin' : '/dashboard';
+  const dashboardPath = basePath;
+  const teamPath = `${basePath}/team`;
+  const settingsPath = `${basePath}/settings`;
 
   // Determine if sidebar should show expanded content
   const expanded = isMobile || isExpanded;
@@ -78,7 +91,7 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
             {expanded && (
               <div className="overflow-hidden">
                 <h1 className="font-semibold text-foreground truncate">Mocha Leads</h1>
-                <p className="text-xs text-muted-foreground truncate">{mockOrganization.name}</p>
+                <p className="text-xs text-muted-foreground truncate">{organizationLabel}</p>
               </div>
             )}
           </div>
@@ -90,10 +103,10 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
           <Tooltip>
             <TooltipTrigger asChild>
               <NavLink
-                to="/dashboard"
+                to={dashboardPath}
                 className={cn(
                   'sidebar-item',
-                  isActive('/dashboard') && 'sidebar-item-active',
+                  isActive(dashboardPath) && 'sidebar-item-active',
                   !expanded && 'justify-center px-2'
                 )}
               >
@@ -131,7 +144,7 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
                   folders.map((folder) => (
                     <NavLink
                       key={folder.id}
-                      to={`/dashboard/folders/${folder.id}`}
+                      to={`${basePath}/folders/${folder.id}`}
                       className={cn(
                         'sidebar-item text-sm py-2',
                         isFolderActive(folder.id) && 'sidebar-item-active'
@@ -167,10 +180,10 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
           <Tooltip>
             <TooltipTrigger asChild>
               <NavLink
-                to="/dashboard/team"
+                to={teamPath}
                 className={cn(
                   'sidebar-item',
-                  isActive('/dashboard/team') && 'sidebar-item-active',
+                  isActive(teamPath) && 'sidebar-item-active',
                   !expanded && 'justify-center px-2'
                 )}
               >
@@ -186,17 +199,17 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
           {/* Messages/Chat */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <NavLink
-                to="/dashboard"
+              <button
+                onClick={() => setBroadcastOpen(true)}
                 className={cn(
                   'sidebar-item',
-                  isActive('/dashboard') && 'sidebar-item-active',
+                  broadcastOpen && 'sidebar-item-active',
                   !expanded && 'justify-center px-2'
                 )}
               >
                 <MessageSquare className="w-5 h-5 flex-shrink-0" />
                 {expanded && <span>Messages</span>}
-              </NavLink>
+              </button>
             </TooltipTrigger>
             {!expanded && (
               <TooltipContent side="right">Messages</TooltipContent>
@@ -204,14 +217,14 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
           </Tooltip>
 
           {/* Settings */}
-          {currentUser.role === 'admin' && (
+          {profile?.role === 'admin' && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <NavLink
-                  to="/dashboard/settings"
+                  to={settingsPath}
                   className={cn(
                     'sidebar-item',
-                    isActive('/dashboard/settings') && 'sidebar-item-active',
+                    isActive(settingsPath) && 'sidebar-item-active',
                     !expanded && 'justify-center px-2'
                   )}
                 >
@@ -239,7 +252,7 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
               >
                 <Avatar className="w-9 h-9 flex-shrink-0">
                   <AvatarFallback className="bg-mocha-200 text-mocha-700 text-sm">
-                    {currentUser.name.split(' ').map(n => n[0]).join('')}
+                    {(displayName || 'U').split(' ').map(n => n[0]).join('')}
                   </AvatarFallback>
                 </Avatar>
                 {expanded && (
@@ -266,7 +279,7 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
             </TooltipTrigger>
             {!expanded && (
               <TooltipContent side="right">
-                {currentUser.name}
+                {displayName}
               </TooltipContent>
             )}
           </Tooltip>
@@ -278,6 +291,14 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
         onOpenChange={setCreateFolderOpen}
         onSuccess={() => refetchFolders()}
       />
+      
+      {/* Broadcast Messages Panel */}
+      {broadcastOpen && organizationId && (
+        <BroadcastMessages 
+          organizationId={organizationId}
+          onClose={() => setBroadcastOpen(false)}
+        />
+      )}
     </TooltipProvider>
   );
 }

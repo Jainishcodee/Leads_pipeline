@@ -22,7 +22,7 @@ interface CreateFolderModalProps {
 }
 
 export function CreateFolderModal({ open, onOpenChange, onSuccess }: CreateFolderModalProps) {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
@@ -40,8 +40,8 @@ export function CreateFolderModal({ open, onOpenChange, onSuccess }: CreateFolde
       return;
     }
 
-    if (!user?.uid) {
-      toast.error('User not authenticated');
+    if (!user?.uid || !profile?.organizationId) {
+      toast.error('User not authenticated or missing organization');
       return;
     }
 
@@ -54,7 +54,7 @@ export function CreateFolderModal({ open, onOpenChange, onSuccess }: CreateFolde
         eventStartDate: formData.eventStartDate ? new Date(formData.eventStartDate) : undefined,
         eventEndDate: formData.eventEndDate ? new Date(formData.eventEndDate) : undefined,
         venue: formData.venue.trim() || undefined,
-        organizationId: 'org_1',
+        organizationId: profile.organizationId,
         createdById: user.uid,
       };
 

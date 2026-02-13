@@ -17,26 +17,31 @@ import NotFound from "@/pages/NotFound";
 import Login from "@/pages/Login";
 import SignUp from "@/pages/SignUp";
 import { AuthProvider, useAuth } from "@/auth/AuthContext";
-import { ProtectedRoute, PublicOnlyRoute, AdminRoute } from "@/auth/ProtectedRoute";
+import { ProtectedRoute, PublicOnlyRoute, AdminRoute, SuperAdminRoute } from "@/auth/ProtectedRoute";
+import SuperAdminDashboard from "@/pages/SuperAdmin";
 
 const queryClient = new QueryClient();
 
 // Root route component that redirects based on user role
 const RootRedirect = () => {
-  const { user, loading } = useAuth();
+  const { user, profile, loading } = useAuth();
   const navigate = useNavigate();
   const [isChecking, setIsChecking] = useState(true);
 
   useEffect(() => {
     if (!loading) {
-      if (user?.email === 'jainishshah356@gmail.com') {
+      if (profile?.role === 'superadmin') {
+        navigate('/super-admin', { replace: true });
+      } else if (profile?.role === 'admin') {
         navigate('/admin', { replace: true });
-      } else {
+      } else if (user) {
         navigate('/dashboard', { replace: true });
+      } else {
+        navigate('/login', { replace: true });
       }
       setIsChecking(false);
     }
-  }, [user, loading, navigate]);
+  }, [user, profile, loading, navigate]);
 
   if (isChecking || loading) {
     return (
@@ -76,7 +81,14 @@ const App = () => (
             <Route element={<AdminRoute />}>
               <Route element={<AdminLayout />}>
                 <Route path="/admin" element={<AdminDashboard />} />
+                <Route path="/admin/leads/:leadId" element={<LeadDetail />} />
+                <Route path="/admin/folders/:folderId" element={<FolderView />} />
+                <Route path="/admin/team" element={<Team />} />
+                <Route path="/admin/settings" element={<Settings />} />
               </Route>
+            </Route>
+            <Route element={<SuperAdminRoute />}>
+              <Route path="/super-admin" element={<SuperAdminDashboard />} />
             </Route>
             <Route path="/" element={<RootRedirect />} />
             <Route path="*" element={<NotFound />} />

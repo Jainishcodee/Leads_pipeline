@@ -12,6 +12,7 @@ import { timestampToDate } from './firestore';
 
 interface UseFirestoreOptions {
   listen?: boolean; // Enable real-time updates
+  skip?: boolean; // Skip fetching when true
 }
 
 export function useFirestoreDoc<T>(
@@ -62,6 +63,13 @@ export function useFirestoreCollection<T extends DocumentData>(
   const [error, setError] = useState<Error | null>(null);
 
   useEffect(() => {
+    if (options.skip) {
+      setData([]);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
 
     if (options.listen) {
@@ -106,9 +114,18 @@ export function useFirestoreCollection<T extends DocumentData>(
           });
       });
     }
-  }, [collectionName, JSON.stringify(constraints), options.listen]);
+  }, [collectionName, JSON.stringify(constraints), options.listen, options.skip]);
 
-  return { data, loading, error, refetch: () => setLoading(true) };
+  return {
+    data,
+    loading,
+    error,
+    refetch: () => {
+      if (!options.skip) {
+        setLoading(true);
+      }
+    },
+  };
 }
 
 // Specialized hooks

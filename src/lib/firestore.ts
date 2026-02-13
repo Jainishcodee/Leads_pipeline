@@ -23,6 +23,7 @@ import { db } from './firebase';
 export const COLLECTIONS = {
   ORGANIZATIONS: 'organizations',
   USERS: 'users',
+  INVITES: 'invites',
   FOLDERS: 'folders',
   LEADS: 'leads',
   LEAD_ASSIGNMENTS: 'leadAssignments',
@@ -200,11 +201,15 @@ export function buildTasksQuery(filters: {
   leadId?: string;
   assignedToId?: string;
   status?: string;
+  organizationId?: string;
 }) {
   const constraints: QueryConstraint[] = [];
   
   if (filters.leadId) {
     constraints.push(where('leadId', '==', filters.leadId));
+  }
+  if (filters.organizationId) {
+    constraints.push(where('organizationId', '==', filters.organizationId));
   }
   if (filters.assignedToId) {
     constraints.push(where('assignedToId', '==', filters.assignedToId));
@@ -222,6 +227,7 @@ export function buildTasksQuery(filters: {
 export function buildActivitiesQuery(filters: {
   leadId?: string;
   organizationId?: string;
+  actorId?: string;
 }) {
   const constraints: QueryConstraint[] = [];
   
@@ -230,6 +236,9 @@ export function buildActivitiesQuery(filters: {
   }
   if (filters.organizationId) {
     constraints.push(where('organizationId', '==', filters.organizationId));
+  }
+  if (filters.actorId) {
+    constraints.push(where('actorId', '==', filters.actorId));
   }
   
   // Always order by createdAt descending

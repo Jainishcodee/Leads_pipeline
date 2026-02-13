@@ -11,7 +11,7 @@ import {
   dateToTimestamp
 } from './firestore';
 import { where } from 'firebase/firestore';
-import type { Lead, Task, ActivityLog, Folder, ChatMessage, Notification, LeadAssignment, User } from '@/types';
+import type { Lead, Task, ActivityLog, Folder, ChatMessage, Notification, LeadAssignment, User, OrganizationInvite } from '@/types';
 
 // Leads API
 export const leadsAPI = {
@@ -67,14 +67,15 @@ export const tasksAPI = {
   },
 
   async update(id: string, data: Partial<Task>) {
-    const updateData: Partial<Task> & { dueDate?: ReturnType<typeof dateToTimestamp> | null } = {
-      ...data,
+    type UpdateData = Partial<Omit<Task, 'dueDate'>> & { dueDate?: ReturnType<typeof dateToTimestamp> | null };
+    const updateData: UpdateData = {
+      ...Object.fromEntries(Object.entries(data || {}).filter(([key]) => key !== 'dueDate')),
     };
 
-    if ('dueDate' in data) {
+    if ('dueDate' in data && data.dueDate !== undefined) {
       updateData.dueDate = data.dueDate ? dateToTimestamp(data.dueDate) : null;
     }
-    return updateDocument(COLLECTIONS.TASKS, id, updateData);
+    return updateDocument(COLLECTIONS.TASKS, id, updateData as unknown as Partial<Task>);
   },
 
   async delete(id: string) {
@@ -92,7 +93,7 @@ export const tasksAPI = {
   },
 
   async getByOrganization(organizationId: string) {
-    const query = [where('organizationId', '==', organizationId)];
+    const query = buildTasksQuery({ organizationId });
     return getDocuments<Task>(COLLECTIONS.TASKS, query);
   },
 };
@@ -141,11 +142,19 @@ export const foldersAPI = {
   async create(folder: Omit<Folder, 'id' | 'createdAt' | 'leadsCount'>) {
     const folderData = {
       ...folder,
+      description: folder.description ?? '',
+      venue: folder.venue ?? '',
       eventStartDate: dateToTimestamp(folder.eventStartDate),
       eventEndDate: dateToTimestamp(folder.eventEndDate),
       leadsCount: 0,
     };
-    return createDocument(COLLECTIONS.FOLDERS, folderData);
+
+    // Strip undefined to avoid Firestore invalid data errors
+    const cleaned = Object.fromEntries(
+      Object.entries(folderData).filter(([, v]) => v !== undefined)
+    );
+
+    return createDocument(COLLECTIONS.FOLDERS, cleaned as unknown as Folder);
   },
 
   async update(id: string, data: Partial<Folder>) {
@@ -189,7 +198,10 @@ export const foldersAPI = {
 // Chat Messages API
 export const chatAPI = {
   async create(message: Omit<ChatMessage, 'id' | 'createdAt'>) {
-    return createDocument(COLLECTIONS.CHAT_MESSAGES, message);
+    return createDocument(COLLECTIONS.CHAT_MESSAGES, {
+      ...message,
+      organizationId: (message as any).organizationId,
+    });
   },
 
   async getByLead(leadId: string) {
@@ -210,16 +222,62 @@ export const notificationsAPI = {
   },
 
   async getByUser(userId: string) {
-    return getDocuments<Notification>(COLLECTIONS.NOTIFICATIONS, []);
+    return getDocuments<Notification>(COLLECTIONS.NOTIFICATIONS, [where('userId', '==', userId)]);
   },
 };
 
 // Users API
 export const usersAPI = {
-  async getAll(organizationId: string) {
-    return getDocuments<User>(COLLECTIONS.USERS, [
-      where('organizationId', '==', organizationId)
-    ]);
+  async getAll(organizationId?: string) {
+    const constraints = organizationId ? [where('organizationId', '==', organizationId)] : [];
+    return getDocuments<User>(COLLECTIONS.USERS, constraints);
+  },
+
+  async getUnassigned() {
+    return getDocuments<User>(COLLECTIONS.USERS, [where('organizationId', '==', null)]);
+  },
+
+  async getByEmail(email: string) {
+    const constraints = [where('email', '==', email.toLowerCase())];
+    const results = await getDocuments<User>(COLLECTIONS.USERS, constraints);
+    return results[0] || null;
+  },
+
+  async update(id: string, data: Partial<User>) {
+    return updateDocument(COLLECTIONS.USERS, id, data);
+  },
+};
+
+// Invites API
+export const invitesAPI = {
+  async create(invite: Omit<OrganizationInvite, 'id' | 'createdAt' | 'respondedAt' | 'status'>) {
+    const payload = {
+      ...invite,
+      status: 'pending' as const,
+    };
+    return createDocument(COLLECTIONS.INVITES, payload);
+  },
+
+  async accept(inviteId: string) {
+    return updateDocument<OrganizationInvite>(COLLECTIONS.INVITES, inviteId, {
+      status: 'accepted',
+      respondedAt: new Date(),
+    });
+  },
+
+  async reject(inviteId: string) {
+    return updateDocument<OrganizationInvite>(COLLECTIONS.INVITES, inviteId, {
+      status: 'rejected',
+      respondedAt: new Date(),
+    });
+  },
+
+  async getByOrganization(organizationId: string) {
+    return getDocuments<OrganizationInvite>(COLLECTIONS.INVITES, [where('organizationId', '==', organizationId)]);
+  },
+
+  async getByEmail(email: string) {
+    return getDocuments<OrganizationInvite>(COLLECTIONS.INVITES, [where('email', '==', email.toLowerCase())]);
   },
 };
 
@@ -237,3 +295,17 @@ export const assignmentsAPI = {
     return getDocuments<LeadAssignment>(COLLECTIONS.LEAD_ASSIGNMENTS, []);
   },
 };
+
+// Organizations API
+export const organizationsAPI = {
+  async create(name: string) {
+    return createDocument(COLLECTIONS.ORGANIZATIONS, { name });
+  },
+
+  async getAll() {
+    return getDocuments<{ id: string; name: string }>(COLLECTIONS.ORGANIZATIONS, []);
+  },
+};
+
+// Broadcast Messages API (replaced adminChat)
+// Using real-time listeners directly in BroadcastMessages component

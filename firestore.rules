@@ -6,69 +6,155 @@ service cloud.firestore {
       return request.auth != null;
     }
     
-    function isOrgMember(orgId) {
-      return isAuthenticated() && 
-             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.organizationId == orgId;
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
     }
-    
-    function isAdmin(orgId) {
-      return isAuthenticated() && 
-             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' &&
-             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.organizationId == orgId;
+
+    function userRole() {
+      return isAuthenticated() ? userDoc().data.role : null;
+    }
+
+    function userOrgId() {
+      return isAuthenticated() ? userDoc().data.organizationId : null;
+    }
+
+    function isSuperAdmin() {
+      return isAuthenticated() && userRole() == 'superadmin';
+    }
+
+    function isOrgMember(orgId) {
+      return isAuthenticated() && userOrgId() == orgId;
+    }
+
+    function isOrgAdmin(orgId) {
+      return isAuthenticated() && userRole() == 'admin' && userOrgId() == orgId;
+    }
+
+    function orgScopedAccess(orgId) {
+      return isSuperAdmin() || isOrgMember(orgId);
+    }
+
+    function userInOrg(userId, orgId) {
+      return isAuthenticated()
+        && get(/databases/$(database)/documents/users/$(userId)).data.organizationId == orgId;
+    }
+
+    function leadInOrg(leadId, orgId) {
+      return get(/databases/$(database)/documents/leads/$(leadId)).data.organizationId == orgId;
     }
     
     // Organizations
     match /organizations/{orgId} {
-      allow read: if isOrgMember(orgId);
-      allow write: if isAdmin(orgId);
+      allow read: if isSuperAdmin() || isOrgMember(orgId);
+      allow write: if isSuperAdmin();
     }
     
     // Users
     match /users/{userId} {
-      allow read: if isAuthenticated();
+      allow read: if isSuperAdmin()
+        || (isAuthenticated()
+          && (request.auth.uid == userId
+            || (userOrgId() == resource.data.organizationId && userRole() in ['admin', 'member', 'observer'])
+            || (isOrgAdmin(userOrgId()) && resource.data.organizationId == null)));
       allow create: if isAuthenticated() && request.auth.uid == userId;
-      allow update: if isAuthenticated() && request.auth.uid == userId;
+      allow update: if isSuperAdmin()
+        || (isAuthenticated() && request.auth.uid == userId)
+        || (isOrgAdmin(request.resource.data.organizationId) && request.resource.data.organizationId == userOrgId())
+        || (isAuthenticated()
+          && request.auth.uid == userId
+          && resource.data.organizationId == null
+          && request.resource.data.organizationId is string);
     }
     
     // Folders
     match /folders/{folderId} {
-      allow read: if isOrgMember(resource.data.organizationId);
-      allow create: if isAuthenticated();
-      allow update, delete: if isOrgMember(resource.data.organizationId);
+      allow read: if orgScopedAccess(resource.data.organizationId);
+      allow create: if isSuperAdmin() || isOrgAdmin(request.resource.data.organizationId);
+      allow update, delete: if isSuperAdmin() || isOrgAdmin(resource.data.organizationId);
     }
     
     // Leads
     match /leads/{leadId} {
-      allow read: if isOrgMember(resource.data.organizationId);
-      allow create: if isAuthenticated();
-      allow update, delete: if isOrgMember(resource.data.organizationId);
+      allow read: if orgScopedAccess(resource.data.organizationId);
+      allow create: if isSuperAdmin() || isOrgMember(request.resource.data.organizationId);
+      allow update, delete: if isSuperAdmin() || isOrgMember(resource.data.organizationId);
     }
     
     // Lead Assignments
     match /leadAssignments/{assignmentId} {
-      allow read, write: if isAuthenticated();
+      allow read: if isSuperAdmin() || orgScopedAccess(resource.data.organizationId);
+      allow create: if (isSuperAdmin() || orgScopedAccess(request.resource.data.organizationId))
+        && userInOrg(request.resource.data.userId, request.resource.data.organizationId)
+        && leadInOrg(request.resource.data.leadId, request.resource.data.organizationId);
+      allow update, delete: if isSuperAdmin() || orgScopedAccess(resource.data.organizationId);
     }
     
     // Tasks
     match /tasks/{taskId} {
-      allow read, write: if isAuthenticated();
+      allow read: if isSuperAdmin() || orgScopedAccess(resource.data.organizationId);
+      allow create: if (isSuperAdmin() || orgScopedAccess(request.resource.data.organizationId))
+        && request.resource.data.createdById == request.auth.uid
+        && userInOrg(request.resource.data.assignedToId, request.resource.data.organizationId)
+        && leadInOrg(request.resource.data.leadId, request.resource.data.organizationId);
+      allow update: if isSuperAdmin()
+        || isOrgAdmin(resource.data.organizationId)
+        || (isAuthenticated() && request.auth.uid == resource.data.assignedToId)
+        || (isAuthenticated() && request.auth.uid == resource.data.createdById);
+      allow delete: if isSuperAdmin()
+        || isOrgAdmin(resource.data.organizationId)
+        || (isAuthenticated() && request.auth.uid == resource.data.createdById);
     }
     
     // Activities
     match /activities/{activityId} {
-      allow read, write: if isAuthenticated();
+      allow read: if isSuperAdmin() || orgScopedAccess(resource.data.organizationId);
+      allow create: if isSuperAdmin() || orgScopedAccess(request.resource.data.organizationId);
+      allow update, delete: if isSuperAdmin() || orgScopedAccess(resource.data.organizationId);
     }
     
     // Chat Messages
     match /chatMessages/{messageId} {
-      allow read, write: if isAuthenticated();
+      allow read: if isSuperAdmin()
+        || orgScopedAccess(resource.data.organizationId)
+        || (isAuthenticated() && !('organizationId' in resource.data));
+
+      allow create: if isSuperAdmin()
+        || orgScopedAccess(request.resource.data.organizationId)
+        || (isAuthenticated() && request.resource.data.organizationId == null);
+
+      allow update, delete: if isSuperAdmin() || orgScopedAccess(resource.data.organizationId);
+    }
+
+    // Broadcast Messages (Admin to all team members)
+    match /broadcastMessages/{messageId} {
+      allow read: if isSuperAdmin() || isOrgMember(resource.data.organizationId);
+      allow create: if isSuperAdmin() || isOrgAdmin(request.resource.data.organizationId);
+      allow update, delete: if isSuperAdmin() || (isOrgAdmin(resource.data.organizationId) && resource.data.senderId == request.auth.uid);
     }
     
     // Notifications
     match /notifications/{notificationId} {
-      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
-      allow create: if isAuthenticated();
+      allow read: if isSuperAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+      allow create: if isAuthenticated()
+        && orgScopedAccess(request.resource.data.organizationId)
+        && userInOrg(request.resource.data.userId, request.resource.data.organizationId);
       allow update: if isAuthenticated() && resource.data.userId == request.auth.uid;
     }
+
+    // Organization Invites
+    match /invites/{inviteId} {
+      allow read: if isSuperAdmin()
+        || (isAuthenticated() && request.auth.token.email != null && resource.data.email == request.auth.token.email)
+        || (isAuthenticated() && resource.data.invitedById == request.auth.uid)
+        || (isAuthenticated() && resource.data.organizationId == userOrgId());
+
+      allow create: if isSuperAdmin() || isOrgAdmin(request.resource.data.organizationId);
+
+      allow update: if isSuperAdmin()
+        || (isAuthenticated() && request.auth.token.email != null && resource.data.email == request.auth.token.email)
+        || (isAuthenticated() && resource.data.invitedById == request.auth.uid)
+        || (isAuthenticated() && resource.data.organizationId == userOrgId());
+    }
+
   }
 }

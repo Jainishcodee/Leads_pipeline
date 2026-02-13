@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Search, Plus, Bell, Menu } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,7 +9,11 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Badge } from '@/components/ui/badge';
-import { mockNotifications } from '@/data/mockData';
+import { useAuth } from '@/auth/AuthContext';
+import { useFirestoreCollection } from '@/lib/useFirestore';
+import { where } from 'firebase/firestore';
+import { invitesAPI, notificationsAPI, usersAPI } from '@/lib/api';
+import { toast } from 'sonner';
 
 interface HeaderProps {
   onMenuClick?: () => void;
@@ -19,7 +23,86 @@ interface HeaderProps {
 
 export function Header({ onMenuClick, onNewLead, showMenuButton = false }: HeaderProps) {
   const [searchQuery, setSearchQuery] = useState('');
-  const unreadCount = mockNotifications.filter(n => !n.read).length;
+  const [processingInviteId, setProcessingInviteId] = useState<string | null>(null);
+  const { profile } = useAuth();
+
+  const constraints = useMemo(
+    () => (profile?.id ? [where('userId', '==', profile.id)] : []),
+    [profile?.id]
+  );
+  const { data: notifications = [] } = useFirestoreCollection<any>('notifications', constraints, { listen: true });
+  const unreadCount = notifications.filter((n) => !n.read).length;
+
+  const inviteConstraints = useMemo(
+    () => (profile?.email ? [
+      where('email', '==', profile.email.toLowerCase()),
+      where('status', '==', 'pending'),
+    ] : []),
+    [profile?.email]
+  );
+
+  const { data: pendingInvites = [] } = useFirestoreCollection<any>('invites', inviteConstraints, { listen: true });
+
+  const handleAcceptInvite = async (invite: any) => {
+    if (!profile?.id) return;
+    if (profile.organizationId) {
+      toast.error('You are already linked to an organization');
+      return;
+    }
+    setProcessingInviteId(invite.id);
+    try {
+      const orgName = invite.organizationName || 'organization';
+      await invitesAPI.accept(invite.id);
+      await usersAPI.update(profile.id, {
+        organizationId: invite.organizationId,
+        role: profile.role || 'member',
+      });
+
+      if (invite.invitedById) {
+        await notificationsAPI.create({
+          userId: invite.invitedById,
+          organizationId: invite.organizationId,
+          type: 'invite_accept',
+          title: 'Invite accepted',
+          message: `${profile.email} accepted your invitation to ${orgName}`,
+          read: false,
+        });
+      }
+
+      toast.success('Invitation accepted');
+    } catch (error) {
+      console.error('Failed to accept invite', error);
+      toast.error('Could not accept invite');
+    } finally {
+      setProcessingInviteId(null);
+    }
+  };
+
+  const handleRejectInvite = async (invite: any) => {
+    setProcessingInviteId(invite.id);
+    try {
+      const orgName = invite.organizationName || 'organization';
+      await invitesAPI.reject(invite.id);
+
+      if (invite.invitedById) {
+        await notificationsAPI.create({
+          userId: invite.invitedById,
+          organizationId: invite.organizationId,
+          type: 'invite_reject',
+          title: 'Invite rejected',
+          message: `${invite.email} declined the invitation to ${orgName}`,
+          read: false,
+        });
+      }
+
+      toast.success('Invitation rejected');
+    } catch (error) {
+      console.error('Failed to reject invite', error);
+      toast.error('Could not reject invite');
+    } finally {
+      setProcessingInviteId(null);
+    }
+  };
 
   return (
     <header className="h-14 md:h-16 border-b border-border bg-background/80 backdrop-blur-sm sticky top-0 z-40">
@@ -83,13 +166,42 @@ export function Header({ onMenuClick, onNewLead, showMenuButton = false }: Heade
               <div className="p-3 border-b border-border">
                 <h3 className="font-semibold">Notifications</h3>
               </div>
+              {pendingInvites.length > 0 && (
+                <div className="p-3 border-b border-border space-y-2">
+                  <p className="text-sm font-medium">Invitations</p>
+                  {pendingInvites.map((invite) => (
+                    <div key={invite.id} className="rounded border border-border p-2">
+                      <p className="text-sm font-semibold">Join organization</p>
+                      <p className="text-xs text-muted-foreground">You were invited to join org {invite.organizationId}</p>
+                      <div className="flex gap-2 mt-2">
+                        <Button
+                          size="sm"
+                          className="btn-mocha"
+                          disabled={Boolean(processingInviteId)}
+                          onClick={() => handleAcceptInvite(invite)}
+                        >
+                          Accept
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={Boolean(processingInviteId)}
+                          onClick={() => handleRejectInvite(invite)}
+                        >
+                          Reject
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className="max-h-80 overflow-y-auto">
-                {mockNotifications.length === 0 ? (
+                {notifications.length === 0 ? (
                   <div className="p-4 text-center text-muted-foreground text-sm">
                     No notifications
                   </div>
                 ) : (
-                  mockNotifications.map((notification) => (
+                  notifications.map((notification) => (
                     <DropdownMenuItem 
                       key={notification.id}
                       className="flex flex-col items-start p-3 cursor-pointer"

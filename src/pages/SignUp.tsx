@@ -43,7 +43,7 @@ const SignUp = () => {
         name: email.split('@')[0], // Use email prefix as default name
         avatar: null,
         role: 'member',
-        organizationId: 'org_1', // Default organization
+        organizationId: null,
         createdAt: serverTimestamp(),
       });
       

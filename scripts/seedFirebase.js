@@ -1,36 +1,56 @@
-// Firebase seed script - Run this once to populate Firestore with initial data
-// Usage: node scripts/seedFirebase.js
+// Firestore seed script (Admin SDK) - Run once to populate Firestore with initial data
+// Usage: node scripts/seedFirebase.js (set GOOGLE_APPLICATION_CREDENTIALS or other ADC)
 
-import { initializeApp } from 'firebase/app';
-import { 
-  getFirestore, 
-  collection, 
-  doc, 
-  setDoc, 
-  Timestamp 
-} from 'firebase/firestore';
+import { initializeApp, applicationDefault, cert } from 'firebase-admin/app';
+import { getFirestore, Timestamp } from 'firebase-admin/firestore';
+import fs from 'fs';
+import path from 'path';
 
-// Firebase configuration
-const firebaseConfig = {
-  apiKey: "AIzaSyD3I2bhp2w21OSIodIq1By8xPH-B2y0hhQ",
-  authDomain: "mocha-cafe-e6fa0.firebaseapp.com",
-  projectId: "mocha-cafe-e6fa0",
-  storageBucket: "mocha-cafe-e6fa0.firebasestorage.app",
-  messagingSenderId: "52119654233",
-  appId: "1:52119654233:web:5b2d3d2a4a157285de4648",
-  measurementId: "G-TM2C9WL3RS",
-};
+const PROJECT_ID =
+  process.env.GCLOUD_PROJECT ||
+  process.env.GOOGLE_CLOUD_PROJECT ||
+  process.env.FIRESTORE_PROJECT_ID ||
+  'mocha-cafe-e6fa0';
 
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
+const SERVICE_ACCOUNT_PATH =
+  process.env.GOOGLE_APPLICATION_CREDENTIALS ||
+  process.env.SERVICE_ACCOUNT_PATH ||
+  path.resolve(process.cwd(), 'serviceAccount.json');
+
+// Prefer explicit service account JSON if available; fallback to ADC
+const hasServiceAccountFile = fs.existsSync(SERVICE_ACCOUNT_PATH);
+const credential = hasServiceAccountFile
+  ? cert(JSON.parse(fs.readFileSync(SERVICE_ACCOUNT_PATH, 'utf8')))
+  : applicationDefault();
+
+// Initialize Admin SDK (uses Application Default Credentials)
+if (!hasServiceAccountFile && !process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+  console.warn(
+    '⚠️  GOOGLE_APPLICATION_CREDENTIALS not set and serviceAccount.json not found; falling back to Application Default Credentials. If this fails, set GOOGLE_APPLICATION_CREDENTIALS to your service account JSON path.'
+  );
+} else {
+  console.log('🔑 Using service account credentials');
+}
+
+if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+  console.log(`ENV GOOGLE_APPLICATION_CREDENTIALS: ${process.env.GOOGLE_APPLICATION_CREDENTIALS}`);
+}
+
+console.log(`Resolved service account path: ${SERVICE_ACCOUNT_PATH} (exists: ${hasServiceAccountFile})`);
+console.log(`Resolved projectId: ${PROJECT_ID}`);
+
+initializeApp({ credential, projectId: PROJECT_ID });
+const db = getFirestore();
 
 // Helper to convert Date to Firestore Timestamp
 const toTimestamp = (date) => Timestamp.fromDate(date);
 
+const ORGANIZATION_ID = 'org_1';
+
 // Seed data
 const seedData = {
   organization: {
-    id: 'org_1',
+    id: ORGANIZATION_ID,
     name: 'Spice Masters FMCG',
     logo: null,
     createdAt: toTimestamp(new Date('2024-01-01'))
@@ -43,7 +63,7 @@ const seedData = {
       name: 'Admin User',
       avatar: null,
       role: 'admin',
-      organizationId: 'org_1',
+      organizationId: ORGANIZATION_ID,
       createdAt: toTimestamp(new Date('2024-01-01'))
     },
     {
@@ -52,7 +72,7 @@ const seedData = {
       name: 'Rahul Sharma',
       avatar: null,
       role: 'member',
-      organizationId: 'org_1',
+      organizationId: ORGANIZATION_ID,
       createdAt: toTimestamp(new Date('2024-01-15'))
     },
     {
@@ -61,7 +81,7 @@ const seedData = {
       name: 'Akash Patel',
       avatar: null,
       role: 'member',
-      organizationId: 'org_1',
+      organizationId: ORGANIZATION_ID,
       createdAt: toTimestamp(new Date('2024-01-15'))
     },
     {
@@ -70,7 +90,7 @@ const seedData = {
       name: 'Raj Kumar',
       avatar: null,
       role: 'member',
-      organizationId: 'org_1',
+      organizationId: ORGANIZATION_ID,
       createdAt: toTimestamp(new Date('2024-02-01'))
     }
   ],
@@ -83,7 +103,7 @@ const seedData = {
       eventStartDate: toTimestamp(new Date('2024-02-19')),
       eventEndDate: toTimestamp(new Date('2024-02-23')),
       venue: 'Dubai World Trade Centre',
-      organizationId: 'org_1',
+      organizationId: ORGANIZATION_ID,
       createdById: 'user_1',
       leadsCount: 45,
       createdAt: toTimestamp(new Date('2024-02-01'))
@@ -95,7 +115,7 @@ const seedData = {
       eventStartDate: toTimestamp(new Date('2024-10-05')),
       eventEndDate: toTimestamp(new Date('2024-10-09')),
       venue: 'Koelnmesse, Cologne',
-      organizationId: 'org_1',
+      organizationId: ORGANIZATION_ID,
       createdById: 'user_1',
       leadsCount: 32,
       createdAt: toTimestamp(new Date('2024-09-15'))
@@ -107,7 +127,7 @@ const seedData = {
       eventStartDate: null,
       eventEndDate: null,
       venue: null,
-      organizationId: 'org_1',
+      organizationId: ORGANIZATION_ID,
       createdById: 'user_2',
       leadsCount: 18,
       createdAt: toTimestamp(new Date('2024-01-20'))
@@ -136,7 +156,7 @@ const seedData = {
       tags: ['Premium', 'UAE Market', 'Distribution'],
       folderId: 'folder_1',
       folderName: 'Gulf Food 2024',
-      organizationId: 'org_1',
+      organizationId: ORGANIZATION_ID,
       createdById: 'user_2',
       createdByName: 'Rahul Sharma',
       convertedAt: null,
@@ -168,7 +188,7 @@ const seedData = {
       tags: ['Organic', 'EU Market', 'Retail'],
       folderId: 'folder_2',
       folderName: 'Anuga 2024',
-      organizationId: 'org_1',
+      organizationId: ORGANIZATION_ID,
       createdById: 'user_3',
       createdByName: 'Akash Patel',
       convertedAt: null,
@@ -185,6 +205,7 @@ const seedData = {
     {
       id: 'task_1',
       leadId: 'lead_1',
+      organizationId: ORGANIZATION_ID,
       assignedToId: 'user_2',
       assignedToName: 'Rahul Sharma',
       title: 'Send welcome email with company profile',
@@ -199,10 +220,10 @@ const seedData = {
     {
       id: 'task_2',
       leadId: 'lead_1',
+      organizationId: ORGANIZATION_ID,
       assignedToId: 'user_3',
       assignedToName: 'Akash Patel',
       title: 'Prepare sample kit for UAE',
-      description: 'Include top 10 spices and 3 RTE products',
       dueDate: toTimestamp(new Date(Date.now() + 172800000)),
       status: 'in_progress',
       priority: 'high',
@@ -214,6 +235,66 @@ const seedData = {
       ],
       createdAt: toTimestamp(new Date('2024-02-21')),
       updatedAt: toTimestamp(new Date())
+    }
+  ],
+
+  invites: [
+    {
+      id: 'invite_1',
+      email: 'newmember@spicemasters.com',
+      organizationId: ORGANIZATION_ID,
+      invitedById: 'user_1',
+      invitedByEmail: 'jainishshah356@gmail.com',
+      status: 'pending',
+      createdAt: toTimestamp(new Date('2024-02-22T08:00:00')),
+      respondedAt: null,
+    },
+  ],
+
+  notifications: [
+    {
+      id: 'notif_1',
+      userId: 'user_2',
+      organizationId: ORGANIZATION_ID,
+      type: 'invite',
+      title: 'You have been invited',
+      message: 'Admin invited you to join Spice Masters FMCG.',
+      leadId: null,
+      read: false,
+      createdAt: toTimestamp(new Date('2024-02-22T09:00:00')),
+    },
+    {
+      id: 'notif_2',
+      userId: 'user_1',
+      organizationId: ORGANIZATION_ID,
+      type: 'task',
+      title: 'Task due soon',
+      message: 'Prepare sample kit for UAE is due soon.',
+      leadId: 'lead_1',
+      read: false,
+      createdAt: toTimestamp(new Date('2024-02-21T12:00:00')),
+    },
+  ],
+
+  broadcastMessages: [
+    {
+      id: 'broadcast_1',
+      organizationId: ORGANIZATION_ID,
+      senderId: 'user_1',
+      senderName: 'Admin User',
+      message: 'Welcome to the team! Please check your tasks and update progress regularly.',
+      createdAt: toTimestamp(new Date('2024-02-22T07:30:00')),
+    },
+    {
+      id: 'chat_2',
+      organizationId: ORGANIZATION_ID,
+      senderId: 'user_2',
+      senderName: 'Rahul Sharma',
+      recipientId: 'team',
+      recipientName: 'Team Members',
+      message: 'Samples will be ready by tomorrow.',
+      read: false,
+      createdAt: toTimestamp(new Date('2024-02-22T08:15:00')),
     }
   ],
 
@@ -237,7 +318,7 @@ const seedData = {
       type: 'status_change',
       description: 'Changed status from Contacted to Qualified',
       metadata: { from: 'contacted', to: 'qualified' },
-      organizationId: 'org_1',
+      organizationId: ORGANIZATION_ID,
       createdAt: toTimestamp(new Date('2024-02-21T09:00:00'))
     }
   ]
@@ -249,36 +330,51 @@ async function seedFirestore() {
   try {
     // Seed organization
     console.log('📦 Seeding organization...');
-    await setDoc(doc(db, 'organizations', seedData.organization.id), seedData.organization);
+    await db.doc(`organizations/${seedData.organization.id}`).set(seedData.organization);
     
     // Seed users
     console.log('👥 Seeding users...');
     for (const user of seedData.users) {
-      await setDoc(doc(db, 'users', user.id), user);
+      await db.doc(`users/${user.id}`).set(user, { merge: true });
     }
     
     // Seed folders
     console.log('📁 Seeding folders...');
     for (const folder of seedData.folders) {
-      await setDoc(doc(db, 'folders', folder.id), folder);
+      await db.doc(`folders/${folder.id}`).set(folder, { merge: true });
     }
     
     // Seed leads
     console.log('🎯 Seeding leads...');
     for (const lead of seedData.leads) {
-      await setDoc(doc(db, 'leads', lead.id), lead);
+      await db.doc(`leads/${lead.id}`).set(lead, { merge: true });
     }
     
     // Seed tasks
     console.log('✅ Seeding tasks...');
     for (const task of seedData.tasks) {
-      await setDoc(doc(db, 'tasks', task.id), task);
+      await db.doc(`tasks/${task.id}`).set(task, { merge: true });
     }
     
     // Seed activities
     console.log('📊 Seeding activities...');
     for (const activity of seedData.activities) {
-      await setDoc(doc(db, 'activities', activity.id), activity);
+      await db.doc(`activities/${activity.id}`).set(activity, { merge: true });
+    }
+
+    console.log('✉️  Seeding invites...');
+    for (const invite of seedData.invites) {
+      await db.doc(`invites/${invite.id}`).set(invite, { merge: true });
+    }
+
+    console.log('🔔 Seeding notifications...');
+    for (const notification of seedData.notifications) {
+      await db.doc(`notifications/${notification.id}`).set(notification, { merge: true });
+    }
+
+    console.log('� Seeding broadcast messages...');
+    for (const msg of seedData.broadcastMessages) {
+      await db.doc(`broadcastMessages/${msg.id}`).set(msg, { merge: true });
     }
     
     console.log('✨ Firestore seed completed successfully!');

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { X, Plus, Trash2, Calendar, ChevronDown, ChevronUp, CheckCircle2, Circle } from 'lucide-react';
 import {
   Dialog,
@@ -18,6 +18,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { toast } from 'sonner';
+import DOMPurify from 'dompurify';
 import { Card, CardContent } from '@/components/ui/card';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import type { TaskStatus, LeadPriority, Lead } from '@/types';
@@ -49,11 +50,13 @@ interface CreateLeadModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   defaultFolderId?: string;
+  editingLead?: Lead;
+  onSuccess?: () => void;
 }
 
-export function CreateLeadModal({ open, onOpenChange, defaultFolderId }: CreateLeadModalProps) {
-  const { user } = useAuth();
-  const organizationId = 'org_1';
+export function CreateLeadModal({ open, onOpenChange, defaultFolderId, editingLead, onSuccess }: CreateLeadModalProps) {
+  const { user, profile } = useAuth();
+  const organizationId = profile?.organizationId || '';
   const { folders, loading: foldersLoading } = useFolders(organizationId);
   const { users, loading: usersLoading } = useUsers(organizationId);
   const [step, setStep] = useState(1);
@@ -96,6 +99,51 @@ export function CreateLeadModal({ open, onOpenChange, defaultFolderId }: CreateL
     userId: string;
     roleInLead: string;
   }>>([]);
+
+  // Pre-fill form data when editing a lead
+  useEffect(() => {
+    if (editingLead && open) {
+      setFormData({
+        folderId: editingLead.folderId || defaultFolderId || '',
+        companyName: editingLead.companyName || '',
+        location: editingLead.location || '',
+        whatsappNumber: editingLead.whatsappNumber || '',
+        emailId: editingLead.emailId || '',
+        interest: editingLead.interest.join(', ') || '',
+        reference: editingLead.reference || '',
+        completeAddress: editingLead.completeAddress || '',
+        managerName: editingLead.managerName || '',
+        managerPhone: editingLead.managerPhone || '',
+        managerEmail: editingLead.managerEmail || '',
+        managerWhatsapp: editingLead.managerWhatsapp || '',
+        priority: editingLead.priority || 'medium',
+        notes: editingLead.notes || '',
+        assignedTo: '',
+        assignedRole: '',
+      });
+      setStep(1);
+    } else if (open && !editingLead) {
+      // Reset form for new lead
+      setFormData({
+        folderId: defaultFolderId || '',
+        companyName: '',
+        location: '',
+        whatsappNumber: '',
+        emailId: '',
+        interest: '',
+        reference: '',
+        completeAddress: '',
+        managerName: '',
+        managerPhone: '',
+        managerEmail: '',
+        managerWhatsapp: '',
+        priority: 'medium',
+        notes: '',
+        assignedTo: '',
+        assignedRole: '',
+      });
+    }
+  }, [editingLead, open, defaultFolderId]);
 
   const usersById = new Map(users.map((member) => [member.id, member]));
   const teamOptions = users;
@@ -202,7 +250,12 @@ export function CreateLeadModal({ open, onOpenChange, defaultFolderId }: CreateL
 
   const handleSubmit = async () => {
     if (!user) {
-      toast.error('You must be logged in to create a lead');
+      toast.error('You must be logged in');
+      return;
+    }
+
+    if (!organizationId) {
+      toast.error('You are not linked to an organization. Please contact an admin.');
       return;
     }
 
@@ -217,86 +270,123 @@ export function CreateLeadModal({ open, onOpenChange, defaultFolderId }: CreateL
       // Get folder info
       const folder = folders.find(f => f.id === formData.folderId);
       
-      // Create lead
-      const leadData: Omit<Lead, 'id' | 'createdAt' | 'updatedAt' | 'lastActivityAt'> = {
-        companyName: formData.companyName,
-        location: formData.location,
-        whatsappNumber: formData.whatsappNumber,
-        emailId: formData.emailId,
-        interest: formData.interest ? formData.interest.split(',').map(i => i.trim()) : [],
-        reference: formData.reference || null,
-        completeAddress: formData.completeAddress,
-        managerName: formData.managerName,
-        managerPhone: formData.managerPhone,
-        managerEmail: formData.managerEmail,
-        managerWhatsapp: formData.managerWhatsapp,
-        status: 'new',
-        priority: formData.priority as 'low' | 'medium' | 'high',
-        valueEstimate: null,
-        nextFollowUpDate: null,
-        notes: formData.notes || null,
-        tags: [],
-        folderId: formData.folderId,
-        folderName: folder?.name || '',
-        organizationId,
-        createdById: user.uid,
-        createdByName: user.email?.split('@')[0] || 'Unknown',
-        convertedAt: null,
-        cancelledAt: null,
-        cancellationReason: null,
-        duplicateOfLeadId: null,
+      // Sanitize common fields
+      const sanitizedData = {
+        companyName: DOMPurify.sanitize(formData.companyName, { ALLOWED_TAGS: [] }),
+        location: DOMPurify.sanitize(formData.location, { ALLOWED_TAGS: [] }),
+        whatsappNumber: DOMPurify.sanitize(formData.whatsappNumber, { ALLOWED_TAGS: [] }),
+        emailId: DOMPurify.sanitize(formData.emailId, { ALLOWED_TAGS: [] }),
+        interest: formData.interest ? formData.interest.split(',').map(i => DOMPurify.sanitize(i.trim(), { ALLOWED_TAGS: [] })) : [],
+        reference: formData.reference ? DOMPurify.sanitize(formData.reference, { ALLOWED_TAGS: [] }) : null,
+        completeAddress: DOMPurify.sanitize(formData.completeAddress, { ALLOWED_TAGS: [] }),
+        managerName: DOMPurify.sanitize(formData.managerName, { ALLOWED_TAGS: [] }),
+        managerPhone: DOMPurify.sanitize(formData.managerPhone, { ALLOWED_TAGS: [] }),
+        managerEmail: DOMPurify.sanitize(formData.managerEmail, { ALLOWED_TAGS: [] }),
+        managerWhatsapp: DOMPurify.sanitize(formData.managerWhatsapp, { ALLOWED_TAGS: [] }),
+        notes: formData.notes ? DOMPurify.sanitize(formData.notes, { ALLOWED_TAGS: [] }) : null,
       };
 
-      const leadId = await leadsAPI.create(leadData);
-      
-      // Create tasks
-      for (const task of tasks.filter(t => t.title)) {
-        const assignedUser = usersById.get(task.assignedToId || '') || null;
-        await tasksAPI.create({
+      if (editingLead) {
+        // UPDATE MODE: Update existing lead
+        const leadData: Partial<Lead> = {
+          ...sanitizedData,
+          priority: formData.priority as 'low' | 'medium' | 'high',
+        };
+        
+        await leadsAPI.update(editingLead.id, leadData);
+        
+        // Log edit activity
+        await activitiesAPI.logActivity(
+          editingLead.id,
+          user.uid,
+          user.email?.split('@')[0] || 'User',
+          'lead_edited',
+          `Edited lead ${sanitizedData.companyName}`,
+          organizationId,
+          { companyName: sanitizedData.companyName }
+        );
+        
+        toast.success('Lead updated successfully!');
+        onOpenChange(false);
+        if (onSuccess) onSuccess();
+      } else {
+        // CREATE MODE: Create new lead
+        const leadData: Omit<Lead, 'id' | 'createdAt' | 'updatedAt' | 'lastActivityAt'> = {
+          ...sanitizedData,
+          status: 'new',
+          priority: formData.priority as 'low' | 'medium' | 'high',
+          valueEstimate: null,
+          nextFollowUpDate: null,
+          tags: [],
+          folderId: formData.folderId,
+          folderName: folder?.name || '',
+          organizationId,
+          createdById: user.uid,
+          createdByName: user.email?.split('@')[0] || 'Unknown',
+          convertedAt: null,
+          cancelledAt: null,
+          cancellationReason: null,
+          duplicateOfLeadId: null,
+        };
+
+        const leadId = await leadsAPI.create(leadData);
+        
+        // Create tasks
+        for (const task of tasks.filter(t => t.title)) {
+          const assignedUser = usersById.get(task.assignedToId || '') || null;
+          await tasksAPI.create({
+            leadId,
+            organizationId,
+            assignedToId: task.assignedToId || user.uid,
+            assignedToName: assignedUser?.name || user.email?.split('@')[0] || 'Unassigned',
+            createdById: user.uid,
+            createdByName: user.email?.split('@')[0] || 'User',
+            title: DOMPurify.sanitize(task.title, { ALLOWED_TAGS: [] }),
+            description: task.description ? DOMPurify.sanitize(task.description, { ALLOWED_TAGS: [] }) : null,
+            dueDate: task.dueDate ? new Date(task.dueDate) : null,
+            status: task.status,
+            priority: task.priority,
+            checklist: task.subtasks.map(st => ({
+              id: st.id,
+              text: DOMPurify.sanitize(st.title, { ALLOWED_TAGS: [] }),
+              completed: st.status === 'completed'
+            })),
+          });
+        }
+        
+        // Create team assignments
+        for (const member of teamMembers) {
+          const memberUser = usersById.get(member.userId);
+          await assignmentsAPI.create({
+            leadId,
+            organizationId,
+            userId: member.userId,
+            userName: memberUser?.name || 'Unknown',
+            roleInLead: DOMPurify.sanitize(member.roleInLead, { ALLOWED_TAGS: [] }),
+            createdAt: new Date(),
+          });
+        }
+        
+        // Log activity
+        await activitiesAPI.logActivity(
           leadId,
-          assignedToId: task.assignedToId || user.uid,
-          assignedToName: assignedUser?.name || user.email?.split('@')[0] || 'Unassigned',
-          title: task.title,
-          description: task.description || null,
-          dueDate: task.dueDate ? new Date(task.dueDate) : null,
-          status: task.status,
-          priority: task.priority,
-          checklist: task.subtasks.map(st => ({
-            id: st.id,
-            text: st.title,
-            completed: st.status === 'completed'
-          })),
-        });
+          user.uid,
+          user.email?.split('@')[0] || 'User',
+          'lead_created',
+          `Created lead ${sanitizedData.companyName}`,
+          organizationId,
+          { companyName: sanitizedData.companyName }
+        );
+        
+        // Increment folder lead count
+        await foldersAPI.incrementLeadCount(formData.folderId);
+        
+        toast.success(`Lead created successfully with ${tasks.length} task(s) and ${teamMembers.length} team member(s)!`);
+        onOpenChange(false);
+        if (onSuccess) onSuccess();
       }
       
-      // Create team assignments
-      for (const member of teamMembers) {
-        const memberUser = usersById.get(member.userId);
-        await assignmentsAPI.create({
-          leadId,
-          userId: member.userId,
-          userName: memberUser?.name || 'Unknown',
-          roleInLead: member.roleInLead,
-          createdAt: new Date(),
-        });
-      }
-      
-      // Log activity
-      await activitiesAPI.logActivity(
-        leadId,
-        user.uid,
-        user.email?.split('@')[0] || 'User',
-        'lead_created',
-        `Created lead ${formData.companyName}`,
-        organizationId,
-        { companyName: formData.companyName }
-      );
-      
-      // Increment folder lead count
-      await foldersAPI.incrementLeadCount(formData.folderId);
-      
-      toast.success(`Lead created successfully with ${tasks.length} task(s) and ${teamMembers.length} team member(s)!`);
-      onOpenChange(false);
+      // Reset form
       setStep(1);
       setFormData({
         folderId: defaultFolderId || '',
@@ -319,11 +409,13 @@ export function CreateLeadModal({ open, onOpenChange, defaultFolderId }: CreateL
       setTasks([]);
       setTeamMembers([]);
       
-      // Refresh the page to show new lead
-      window.location.reload();
+      // Refresh the page to show updated lead
+      if (!editingLead) {
+        window.location.reload();
+      }
     } catch (error) {
-      console.error('Error creating lead:', error);
-      toast.error('Failed to create lead. Please try again.');
+      console.error('Error saving lead:', error);
+      toast.error(`Failed to ${editingLead ? 'update' : 'create'} lead. Please try again.`);
     } finally {
       setIsSubmitting(false);
     }
@@ -333,7 +425,9 @@ export function CreateLeadModal({ open, onOpenChange, defaultFolderId }: CreateL
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="text-xl font-semibold">Create New Lead</DialogTitle>
+          <DialogTitle className="text-xl font-semibold">
+            {editingLead ? 'Edit Lead' : 'Create New Lead'}
+          </DialogTitle>
         </DialogHeader>
 
         <div className="space-y-6 py-4">
@@ -810,7 +904,7 @@ export function CreateLeadModal({ open, onOpenChange, defaultFolderId }: CreateL
                 onClick={handleSubmit}
                 disabled={isSubmitting}
               >
-                {isSubmitting ? 'Creating...' : 'Create Lead'}
+                {isSubmitting ? (editingLead ? 'Saving...' : 'Creating...') : (editingLead ? 'Save' : 'Create Lead')}
               </Button>
             )}
           </div>
