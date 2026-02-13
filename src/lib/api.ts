@@ -27,13 +27,23 @@ export const leadsAPI = {
   },
 
   async update(id: string, data: Partial<Lead>) {
-    const updateData = {
-      ...data,
-      nextFollowUpDate: data.nextFollowUpDate ? dateToTimestamp(data.nextFollowUpDate) : undefined,
-      convertedAt: data.convertedAt ? dateToTimestamp(data.convertedAt) : undefined,
-      cancelledAt: data.cancelledAt ? dateToTimestamp(data.cancelledAt) : undefined,
+    // Build updateData, removing any undefined values and converting dates properly
+    const updateData: any = {
       lastActivityAt: new Date(),
     };
+
+    // Only add fields that are explicitly passed in data
+    Object.keys(data).forEach(key => {
+      if (key === 'nextFollowUpDate' || key === 'convertedAt' || key === 'cancelledAt') {
+        const value = data[key as keyof typeof data];
+        if (value !== undefined) {
+          updateData[key] = value ? dateToTimestamp(value as Date) : null;
+        }
+      } else if (data[key as keyof typeof data] !== undefined) {
+        updateData[key] = data[key as keyof typeof data];
+      }
+    });
+
     return updateDocument(COLLECTIONS.LEADS, id, updateData);
   },
 
@@ -201,6 +211,8 @@ export const chatAPI = {
     return createDocument(COLLECTIONS.CHAT_MESSAGES, {
       ...message,
       organizationId: (message as any).organizationId,
+      read: false,
+      readBy: [],
     });
   },
 
@@ -208,6 +220,22 @@ export const chatAPI = {
     return getDocuments<ChatMessage>(COLLECTIONS.CHAT_MESSAGES, [
       where('leadId', '==', leadId)
     ]);
+  },
+
+  async markMessagesAsRead(leadId: string, userId: string) {
+    const messages = await this.getByLead(leadId);
+    const unreadMessages = messages.filter(msg => 
+      msg.senderId !== userId && (!msg.readBy || !msg.readBy.includes(userId))
+    );
+    
+    await Promise.all(
+      unreadMessages.map(msg => 
+        updateDocument(COLLECTIONS.CHAT_MESSAGES, msg.id, {
+          read: true,
+          readBy: [...(msg.readBy || []), userId],
+        })
+      )
+    );
   },
 };
 
@@ -219,6 +247,15 @@ export const notificationsAPI = {
 
   async markAsRead(id: string) {
     return updateDocument(COLLECTIONS.NOTIFICATIONS, id, { read: true });
+  },
+
+  async markAllAsRead(userId: string) {
+    const notifications = await this.getByUser(userId);
+    const unreadNotifications = notifications.filter(n => !n.read);
+    
+    await Promise.all(
+      unreadNotifications.map(n => this.markAsRead(n.id))
+    );
   },
 
   async delete(id: string) {
@@ -238,7 +275,15 @@ export const usersAPI = {
   },
 
   async getUnassigned() {
-    return getDocuments<User>(COLLECTIONS.USERS, [where('organizationId', '==', null)]);
+    // Firestore's where('organizationId', '==', null) won't match documents where the field is missing
+    // So we get all users and filter in code to catch null, undefined, and empty string
+    const allUsers = await getDocuments<User>(COLLECTIONS.USERS, []);
+    return allUsers.filter(user => 
+      !user.organizationId || 
+      user.organizationId === null || 
+      user.organizationId === undefined ||
+      user.organizationId === ''
+    );
   },
 
   async getByEmail(email: string) {

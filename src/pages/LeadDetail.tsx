@@ -49,6 +49,16 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { StatusBadge } from '@/components/leads/StatusBadge';
 import { PriorityBadge } from '@/components/leads/PriorityBadge';
 import { CreateLeadModal } from '@/components/leads/CreateLeadModal';
@@ -86,6 +96,8 @@ export default function LeadDetail() {
   const [selectedAssignee, setSelectedAssignee] = useState('');
   const [assigneeRole, setAssigneeRole] = useState('');  
   const [selectedMemberFilter, setSelectedMemberFilter] = useState<string>('all');
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   
   const { lead, loading: leadLoading, refetch: refetchLead } = useLead(leadId);
   const organizationId = lead?.organizationId || profile?.organizationId || '';
@@ -94,6 +106,11 @@ export default function LeadDetail() {
   const { assignments, loading: assignmentsLoading, refetch: refetchAssignments } = useLeadAssignments(leadId, organizationId);
   const { users, loading: usersLoading } = useUsers(organizationId);
   const { messages, refetch: refetchMessages } = useLeadChat(leadId, organizationId);
+  
+  // Calculate unread messages count
+  const unreadMessagesCount = messages.filter(msg => 
+    msg.senderId !== user?.uid && (!msg.readBy || !msg.readBy.includes(user?.uid || ''))
+  ).length;
   const [attachments, setAttachments] = useState<LeadAttachment[]>([]);
   const [loadingAttachments, setLoadingAttachments] = useState(true);
   const [uploadingFiles, setUploadingFiles] = useState<string[]>([]);
@@ -132,6 +149,40 @@ export default function LeadDetail() {
     if (status === 'in_progress') return 'Ongoing';
     return 'Pending';
   };
+
+  // Handle browser back button for chat panel
+  useEffect(() => {
+    const handlePopState = (e: PopStateEvent) => {
+      if (chatOpen) {
+        // Prevent navigation and just close the chat
+        e.preventDefault();
+        setChatOpen(false);
+        // Push state back to keep user on the same page
+        window.history.pushState({ chatOpen: false }, '');
+      }
+    };
+
+    if (chatOpen) {
+      // Push a new history state when chat opens
+      window.history.pushState({ chatOpen: true }, '');
+      window.addEventListener('popstate', handlePopState);
+    }
+
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [chatOpen]);
+
+  // Mark messages as read when chat opens
+  useEffect(() => {
+    if (chatOpen && user?.uid && leadId) {
+      chatAPI.markMessagesAsRead(leadId, user.uid).then(() => {
+        refetchMessages();
+      }).catch(err => {
+        console.error('Failed to mark messages as read:', err);
+      });
+    }
+  }, [chatOpen, user?.uid, leadId]);
   
   const handleTaskStatusChange = (taskId: string, newStatus: string, taskTitle: string) => {
     // Find the task to get the old status
@@ -238,14 +289,34 @@ export default function LeadDetail() {
         { newStatus: 'cancelled', reason: cancellationReason }
       );
       
-      toast.success('Lead cancelled');
+      toast.success('Lead marked as not converted');
       setShowCancelDialog(false);
       setCancellationReason('');
       refetchLead();
       refetchActivities();
     } catch (error) {
       console.error('Error cancelling lead:', error);
-      toast.error('Failed to cancel lead');
+      toast.error('Failed to mark lead as not converted');
+    }
+  };
+
+  const handleDeleteLead = async () => {
+    if (!leadId || !isAdmin) {
+      toast.error('Only admins can delete leads');
+      return;
+    }
+
+    try {
+      setIsDeleting(true);
+      await leadsAPI.delete(leadId);
+      toast.success('Lead deleted successfully');
+      setShowDeleteDialog(false);
+      navigate('/dashboard');
+    } catch (error) {
+      console.error('Error deleting lead:', error);
+      toast.error('Failed to delete lead');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -283,6 +354,24 @@ export default function LeadDetail() {
   const handleCancelNotes = () => {
     setNotesText(lead?.notes || '');
     setEditNotesMode(false);
+  };
+
+  const handleToggleChecklistItem = async (taskId: string, itemId: string, currentCompleted: boolean) => {
+    try {
+      const task = tasks.find(t => t.id === taskId);
+      if (!task || !task.checklist) return;
+
+      const updatedChecklist = task.checklist.map(item =>
+        item.id === itemId ? { ...item, completed: !currentCompleted } : item
+      );
+
+      await tasksAPI.update(taskId, { checklist: updatedChecklist });
+      toast.success('Checklist updated');
+      refetchTasks();
+    } catch (error) {
+      console.error('Error updating checklist:', error);
+      toast.error('Failed to update checklist');
+    }
   };
 
   const handleSetFollowUp = async () => {
@@ -791,7 +880,7 @@ export default function LeadDetail() {
                     onClick={() => setShowCancelDialog(true)}
                   >
                     <XCircle className="w-4 h-4 mr-1" />
-                    <span className="hidden sm:inline">Cancel</span>
+                    <span className="hidden sm:inline">Not converted</span>
                   </Button>
                 </>
               )}
@@ -814,7 +903,15 @@ export default function LeadDetail() {
                     <Plus className="w-4 h-4 mr-2" />
                     Add Task
                   </DropdownMenuItem>
-                  <DropdownMenuItem className="text-destructive">Delete Lead</DropdownMenuItem>
+                  {isAdmin && (
+                    <DropdownMenuItem 
+                      className="text-destructive" 
+                      onClick={() => setShowDeleteDialog(true)}
+                    >
+                      <Trash2 className="w-4 h-4 mr-2" />
+                      Delete Lead
+                    </DropdownMenuItem>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
@@ -1171,12 +1268,16 @@ export default function LeadDetail() {
                                 {task.checklist && task.checklist.length > 0 && (
                                   <div className="mt-3 space-y-1.5">
                                     {task.checklist.map((item) => (
-                                      <div key={item.id} className="flex items-center gap-2 text-sm">
+                                      <div 
+                                        key={item.id} 
+                                        className="flex items-center gap-2 text-sm cursor-pointer hover:bg-muted/50 p-1 rounded"
+                                        onClick={() => handleToggleChecklistItem(task.id, item.id, item.completed)}
+                                      >
                                         <div className={cn(
-                                          'w-4 h-4 rounded border flex items-center justify-center',
+                                          'w-4 h-4 rounded border flex items-center justify-center transition-colors',
                                           item.completed 
                                             ? 'bg-mocha-500 border-mocha-500' 
-                                            : 'border-mocha-300'
+                                            : 'border-mocha-300 hover:border-mocha-400'
                                         )}>
                                           {item.completed && (
                                             <CheckCircle className="w-3 h-3 text-white" />
@@ -1448,9 +1549,9 @@ export default function LeadDetail() {
         onClick={() => setChatOpen(!chatOpen)}
       >
         <MessageCircle className="w-5 h-5 md:w-6 md:h-6" />
-        {messages.length > 0 && (
+        {unreadMessagesCount > 0 && (
           <span className="absolute -top-1 -right-1 w-5 h-5 bg-destructive text-destructive-foreground text-xs rounded-full flex items-center justify-center">
-            {messages.length}
+            {unreadMessagesCount}
           </span>
         )}
       </Button>
@@ -1477,38 +1578,60 @@ export default function LeadDetail() {
         </DialogContent>
       </Dialog>
 
-      {/* Cancel Dialog */}
+      {/* Not Converted Dialog */}
       <Dialog open={showCancelDialog} onOpenChange={setShowCancelDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Cancel Lead</DialogTitle>
+            <DialogTitle>Mark Lead as Not Converted</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label htmlFor="cancellation-reason">Reason for Cancellation *</Label>
+              <Label htmlFor="cancellation-reason">Reason *</Label>
               <Textarea
                 id="cancellation-reason"
                 value={cancellationReason}
                 onChange={(e) => setCancellationReason(e.target.value)}
-                placeholder="Enter the reason for cancelling this lead..."
+                placeholder="Enter the reason why this lead was not converted..."
                 className="min-h-[100px]"
               />
             </div>
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setShowCancelDialog(false)}>
-                Cancel
+                Close
               </Button>
               <Button 
                 onClick={handleCancel} 
                 variant="destructive"
                 disabled={!cancellationReason}
               >
-                Cancel Lead
+                Mark as Not Converted
               </Button>
             </div>
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Delete Lead Confirmation Dialog */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Lead</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this lead? This action cannot be undone and will remove all associated data, tasks, and activities.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteLead}
+              disabled={isDeleting}
+              className="bg-destructive hover:bg-destructive/90"
+            >
+              {isDeleting ? 'Deleting...' : 'Delete Lead'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Follow-up Dialog */}
       <Dialog open={showFollowUpDialog} onOpenChange={setShowFollowUpDialog}>

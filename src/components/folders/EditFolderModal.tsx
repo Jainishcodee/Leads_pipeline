@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '@/auth/AuthContext';
 import { foldersAPI } from '@/lib/api';
 import { toast } from 'sonner';
@@ -21,9 +21,10 @@ interface EditFolderModalProps {
   onOpenChange: (open: boolean) => void;
   folder: Folder;
   onSuccess?: () => void;
+  existingFolders?: Folder[];
 }
 
-export function EditFolderModal({ open, onOpenChange, folder, onSuccess }: EditFolderModalProps) {
+export function EditFolderModal({ open, onOpenChange, folder, onSuccess, existingFolders = [] }: EditFolderModalProps) {
   const { profile } = useAuth();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
@@ -33,6 +34,13 @@ export function EditFolderModal({ open, onOpenChange, folder, onSuccess }: EditF
     eventEndDate: '',
     venue: '',
   });
+
+  const existingFolderNames = useMemo(() => 
+    existingFolders
+      .filter(f => f.id !== folder.id) // Exclude current folder
+      .map(f => f.name.toLowerCase().trim()),
+    [existingFolders, folder.id]
+  );
 
   useEffect(() => {
     if (folder) {
@@ -61,6 +69,13 @@ export function EditFolderModal({ open, onOpenChange, folder, onSuccess }: EditF
     
     if (!formData.name.trim()) {
       toast.error('Folder name is required');
+      return;
+    }
+
+    // Check for duplicate folder names (excluding current folder)
+    const folderNameLower = formData.name.trim().toLowerCase();
+    if (existingFolderNames.includes(folderNameLower)) {
+      toast.error('A folder with this name already exists');
       return;
     }
 

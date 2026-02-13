@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useAuth } from '@/auth/AuthContext';
 import { foldersAPI } from '@/lib/api';
 import { toast } from 'sonner';
@@ -19,9 +19,10 @@ interface CreateFolderModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess?: () => void;
+  existingFolders?: Folder[];
 }
 
-export function CreateFolderModal({ open, onOpenChange, onSuccess }: CreateFolderModalProps) {
+export function CreateFolderModal({ open, onOpenChange, onSuccess, existingFolders = [] }: CreateFolderModalProps) {
   const { user, profile } = useAuth();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
@@ -32,11 +33,23 @@ export function CreateFolderModal({ open, onOpenChange, onSuccess }: CreateFolde
     venue: '',
   });
 
+  const existingFolderNames = useMemo(() => 
+    existingFolders.map(f => f.name.toLowerCase().trim()),
+    [existingFolders]
+  );
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
     if (!formData.name.trim()) {
       toast.error('Folder name is required');
+      return;
+    }
+
+    // Check for duplicate folder names
+    const folderNameLower = formData.name.trim().toLowerCase();
+    if (existingFolderNames.includes(folderNameLower)) {
+      toast.error('A folder with this name already exists');
       return;
     }
 

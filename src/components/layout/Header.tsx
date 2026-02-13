@@ -26,6 +26,7 @@ interface HeaderProps {
 export function Header({ onMenuClick, onNewLead, showMenuButton = false }: HeaderProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [processingInviteId, setProcessingInviteId] = useState<string | null>(null);
+  const [notificationDropdownOpen, setNotificationDropdownOpen] = useState(false);
   const { profile } = useAuth();
   const navigate = useNavigate();
 
@@ -153,9 +154,18 @@ export function Header({ onMenuClick, onNewLead, showMenuButton = false }: Heade
     }
   };
 
+  // Mark all notifications as read when dropdown opens
+  useEffect(() => {
+    if (notificationDropdownOpen && profile?.id && unreadCount > 0) {
+      notificationsAPI.markAllAsRead(profile.id).catch(err => {
+        console.error('Failed to mark notifications as read:', err);
+      });
+    }
+  }, [notificationDropdownOpen, profile?.id, unreadCount]);
+
   const handleNotificationClick = async (notification: any) => {
     try {
-      // Mark as read
+      // Mark as read (redundant now but kept for safety)
       if (!notification.read) {
         await notificationsAPI.markAsRead(notification.id);
       }
@@ -209,7 +219,7 @@ export function Header({ onMenuClick, onNewLead, showMenuButton = false }: Heade
           </Button>
 
           {/* Notifications */}
-          <DropdownMenu>
+          <DropdownMenu open={notificationDropdownOpen} onOpenChange={setNotificationDropdownOpen}>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon" className="relative h-9 w-9 md:h-10 md:w-10">
                 <Bell className="w-5 h-5" />

@@ -66,10 +66,7 @@ export default function Settings() {
             <Users className="w-4 h-4" />
             Users & Roles
           </TabsTrigger>
-          <TabsTrigger value="folders" className="gap-1.5">
-            <FolderOpen className="w-4 h-4" />
-            Folder Settings
-          </TabsTrigger>
+          
           <TabsTrigger value="templates" className="gap-1.5">
             <FileText className="w-4 h-4" />
             Templates

@@ -161,6 +161,8 @@ export interface ChatMessage {
   mentions?: string[]; // user IDs
   attachments?: Attachment[];
   isSystemMessage?: boolean;
+  read?: boolean;
+  readBy?: string[]; // user IDs who have read the message
   createdAt: Date;
   editedAt?: Date;
 }

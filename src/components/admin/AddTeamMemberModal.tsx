@@ -72,13 +72,13 @@ export function AddTeamMemberModal({
   const nonTeamUsers = searchResults.filter(
     u => !currentTeamMemberIds.includes(u.id)
       && u.role !== 'admin'
-      && u.organizationId == null
+      && (u.organizationId == null || u.organizationId === undefined || u.organizationId === '')
       && u.id !== authUser?.uid
   );
 
   const filteredUsers = nonTeamUsers.filter(u =>
-    u.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    u.email.toLowerCase().includes(searchQuery.toLowerCase())
+    u.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    u.email?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const handleSearchUsers = async () => {

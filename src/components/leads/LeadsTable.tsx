@@ -28,6 +28,7 @@ import {
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { StatusBadge } from './StatusBadge';
 import { PriorityBadge } from './PriorityBadge';
+import { CreateLeadModal } from './CreateLeadModal';
 import { cn } from '@/lib/utils';
 import { timestampToDate } from '@/lib/firestore';
 import { useAuth } from '@/auth/AuthContext';
@@ -52,6 +53,8 @@ export function LeadsTable({ leads, showFolder = false }: LeadsTableProps) {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [leadToDelete, setLeadToDelete] = useState<Lead | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [leadToEdit, setLeadToEdit] = useState<Lead | null>(null);
 
   const handleDeleteLead = async () => {
     if (!leadToDelete) return;
@@ -70,9 +73,16 @@ export function LeadsTable({ leads, showFolder = false }: LeadsTableProps) {
     }
   };
 
-  const openDeleteDialog = (lead: Lead) => {
+  const openDeleteDialog = (lead: Lead, e?: React.MouseEvent) => {
+    e?.stopPropagation();
     setLeadToDelete(lead);
     setDeleteDialogOpen(true);
+  };
+
+  const openEditModal = (lead: Lead, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setLeadToEdit(lead);
+    setEditModalOpen(true);
   };
 
   const toDate = (value: Lead[typeof sortField] | null | undefined) =>
@@ -266,13 +276,18 @@ export function LeadsTable({ leads, showFolder = false }: LeadsTableProps) {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => navigate(`${basePath}/leads/${lead.id}`)}>
+                          <DropdownMenuItem onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(`${basePath}/leads/${lead.id}`);
+                          }}>
                             View Details
                           </DropdownMenuItem>
-                          <DropdownMenuItem>Edit Lead</DropdownMenuItem>
+                          <DropdownMenuItem onClick={(e) => openEditModal(lead, e)}>
+                            Edit Lead
+                          </DropdownMenuItem>
                           <DropdownMenuItem 
                             className="text-destructive"
-                            onClick={() => openDeleteDialog(lead)}
+                            onClick={(e) => openDeleteDialog(lead, e)}
                           >
                             Delete
                           </DropdownMenuItem>
@@ -311,6 +326,19 @@ export function LeadsTable({ leads, showFolder = false }: LeadsTableProps) {
           </AlertDialogAction>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Edit Lead Modal */}
+      {leadToEdit && (
+        <CreateLeadModal
+          open={editModalOpen}
+          onOpenChange={setEditModalOpen}
+          editingLead={leadToEdit}
+          onSuccess={() => {
+            setEditModalOpen(false);
+            setLeadToEdit(null);
+          }}
+        />
+      )}
     </>
   );
 }

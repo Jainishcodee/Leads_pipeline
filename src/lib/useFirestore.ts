@@ -1,5 +1,5 @@
 // Custom React hooks for Firebase operations
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { 
   collection, 
   query, 
@@ -62,6 +62,21 @@ export function useFirestoreCollection<T extends DocumentData>(
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
+  // Create a stable serialization of constraints for dependency tracking
+  const constraintsKey = useMemo(() => {
+    try {
+      return constraints.map((c: any) => {
+        // Extract the key properties from each constraint for comparison 
+        return JSON.stringify({
+          type: c.type,
+          _query: c._query?.toString(),
+        });
+      }).join('|');
+    } catch {
+      return Date.now().toString(); // Fallback to always refresh
+    }
+  }, [constraints]);
+
   useEffect(() => {
     if (options.skip) {
       setData([]);
@@ -114,7 +129,7 @@ export function useFirestoreCollection<T extends DocumentData>(
           });
       });
     }
-  }, [collectionName, JSON.stringify(constraints), options.listen, options.skip]);
+  }, [collectionName, constraintsKey, options.listen, options.skip]);
 
   return {
     data,

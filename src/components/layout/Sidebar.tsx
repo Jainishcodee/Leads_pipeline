@@ -7,7 +7,6 @@ import {
   Plus, 
   ChevronDown,
   ChevronRight,
-  Coffee,
   Users,
   LogOut,
   MessageSquare
@@ -100,12 +99,12 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
             )}
             title="Go to Dashboard"
           >
-            <div className="w-10 h-10 rounded-xl gradient-mocha flex items-center justify-center flex-shrink-0">
-              <Coffee className="w-5 h-5 text-primary-foreground" />
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 overflow-hidden">
+              <img src="/logo.jpeg" alt="Logo" className="w-full h-full object-cover" />
             </div>
             {expanded && (
               <div className="overflow-hidden">
-                <h1 className="font-semibold text-foreground truncate">Mocha Leads</h1>
+                <h1 className="font-semibold text-foreground truncate">Japaate</h1>
                 <p className="text-xs text-muted-foreground truncate">{organizationLabel}</p>
               </div>
             )}
@@ -307,6 +306,7 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
         open={createFolderOpen}
         onOpenChange={setCreateFolderOpen}
         onSuccess={() => refetchFolders()}
+        existingFolders={folders}
       />
       
       {/* Broadcast Messages Panel */}

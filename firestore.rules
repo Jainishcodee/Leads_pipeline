@@ -56,14 +56,14 @@ service cloud.firestore {
         || (isAuthenticated()
           && (request.auth.uid == userId
             || (userOrgId() == resource.data.organizationId && userRole() in ['admin', 'member', 'observer'])
-            || (isOrgAdmin(userOrgId()) && resource.data.organizationId == null)));
+            || (isOrgAdmin(userOrgId()) && (!('organizationId' in resource.data) || resource.data.organizationId == null || resource.data.organizationId == ''))));
       allow create: if isAuthenticated() && request.auth.uid == userId;
       allow update: if isSuperAdmin()
         || (isAuthenticated() && request.auth.uid == userId)
         || (isOrgAdmin(request.resource.data.organizationId) && request.resource.data.organizationId == userOrgId())
         || (isAuthenticated()
           && request.auth.uid == userId
-          && resource.data.organizationId == null
+          && (!('organizationId' in resource.data) || resource.data.organizationId == null || resource.data.organizationId == '')
           && request.resource.data.organizationId is string);
     }
     

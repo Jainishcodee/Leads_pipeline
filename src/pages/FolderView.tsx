@@ -40,7 +40,7 @@ import { format } from 'date-fns';
 import { timestampToDate } from '@/lib/firestore';
 import { useAuth } from '@/auth/AuthContext';
 import { toast } from 'sonner';
-import { foldersAPI } from '@/lib/api';
+import { foldersAPI, leadsAPI } from '@/lib/api';
 import type { Lead } from '@/types';
 
 export default function FolderView() {
@@ -69,8 +69,16 @@ export default function FolderView() {
     
     try {
       setIsDeleting(true);
+      
+      // First, delete all leads in the folder
+      const leadsInFolder = await  leadsAPI.getByFolder(folderId, organizationId);
+      await Promise.all(
+        leadsInFolder.map(lead => leadsAPI.delete(lead.id))
+      );
+      
+      // Then delete the folder
       await foldersAPI.delete(folderId);
-      toast.success('Folder deleted successfully');
+      toast.success('Folder and all its leads deleted successfully');
       setDeleteDialogOpen(false);
       navigate('/dashboard');
     } catch (error) {
@@ -312,6 +320,7 @@ export default function FolderView() {
           open={editFolderOpen}
           onOpenChange={setEditFolderOpen}
           folder={folder}
+          existingFolders={folders}
           onSuccess={() => {
             // Folder list will automatically refresh due to useEffect in useFolders
           }}
