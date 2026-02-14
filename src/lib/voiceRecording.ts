@@ -1,6 +1,5 @@
-// Voice recording utilities for chat
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { storage } from './firebase';
+// Voice recording utilities for chat using Cloudinary
+import { uploadToCloudinary } from './cloudinary';
 
 export class VoiceRecorder {
   private mediaRecorder: MediaRecorder | null = null;
@@ -69,16 +68,17 @@ export async function uploadVoiceRecording(
   try {
     const timestamp = Date.now();
     const fileName = `voice_${leadId}_${senderId}_${timestamp}.webm`;
-    const storageRef = ref(storage, `voice-messages/${leadId}/${fileName}`);
     
-    // Upload the blob
-    await uploadBytes(storageRef, blob, {
-      contentType: 'audio/webm',
+    // Create a File object from the Blob for better upload handling
+    const file = new File([blob], fileName, { type: 'audio/webm' });
+    
+    const result = await uploadToCloudinary(file, {
+      folder: `mocha-pipeline/voice-messages/${leadId}`,
+      resourceType: 'video', // Cloudinary uses 'video' resource type for audio files
+      tags: ['voice', 'lead', leadId, senderId]
     });
 
-    // Get the download URL
-    const downloadURL = await getDownloadURL(storageRef);
-    return downloadURL;
+    return result.secure_url;
   } catch (error) {
     console.error('Error uploading voice recording:', error);
     throw new Error('Failed to upload voice recording');

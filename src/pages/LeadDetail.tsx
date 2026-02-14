@@ -71,9 +71,8 @@ import { useLead, useLeadTasks, useLeadActivities, useLeadAssignments, useLeadCh
 import { leadsAPI, tasksAPI, activitiesAPI, assignmentsAPI, chatAPI, notificationsAPI, attachmentsAPI } from '@/lib/api';
 import { useAuth } from '@/auth/AuthContext';
 import { timestampToDate } from '@/lib/firestore';
-import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
-import { storage } from '@/lib/firebase';
 import { uploadVoiceRecording } from '@/lib/voiceRecording';
+import { uploadToCloudinary } from '@/lib/cloudinary';
 
 export default function LeadDetail() {
   const { leadId } = useParams();
@@ -649,30 +648,18 @@ export default function LeadDetail() {
           continue;
         }
 
-        // Upload to Firebase Storage
-        const timestamp = Date.now();
-        const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
-        const storagePath = `leads/${leadId}/${timestamp}_${sanitizedFileName}`;
-        const storageRef = ref(storage, storagePath);
-        
-        const uploadTask = uploadBytesResumable(storageRef, file, {
-          contentType: file.type || 'application/octet-stream',
-        });
-
-        uploadTask.on(
-          'state_changed',
-          (snapshot) => {
-            const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+        // Upload to Cloudinary
+        const result = await uploadToCloudinary(file, {
+          folder: `mocha-pipeline/leads/${leadId}`,
+          resourceType: 'auto',
+          onProgress: (progress) => {
             console.log(`Upload ${file.name}: ${progress.toFixed(0)}%`);
           },
-          (error) => {
-            console.error('Upload error:', error);
-            toast.error(`Failed to upload ${file.name}`);
-            setUploadingFiles(prev => prev.filter(id => id !== fileId));
-          },
-          async () => {
-            try {
-              const downloadURL = await getDownloadURL(storageRef);
+          tags: ['lead', leadId, 'attachment']
+        });
+
+        try {
+          const downloadURL = result.secure_url;
               
               // Save metadata to Firestore
               const attachmentId = await attachmentsAPI.create({
@@ -697,17 +684,14 @@ export default function LeadDetail() {
                 { fileName: file.name }
               );
 
-              // Reload attachments
-              await loadAttachments();
-              toast.success(`${file.name} uploaded successfully`);
-            } catch (error) {
-              console.error('Error saving attachment:', error);
-              toast.error(`Failed to save ${file.name}`);
-            } finally {
-              setUploadingFiles(prev => prev.filter(id => id !== fileId));
-            }
-          }
-        );
+          // Reload attachments
+          await loadAttachments();
+          toast.success(`${file.name} uploaded successfully`);
+        } catch (error) {
+          console.error('Error saving attachment:', error);
+          toast.error(`Failed to save ${file.name}`);
+          setUploadingFiles(prev => prev.filter(id => id !== fileId));
+        }
       } catch (error) {
         console.error('Error uploading file:', error);
         toast.error(`Failed to upload ${file.name}`);
@@ -728,12 +712,8 @@ export default function LeadDetail() {
       // Delete from Firestore
       await attachmentsAPI.delete(attachment.id);
 
-      // Delete from Storage
-      const storageRef = ref(storage, attachment.fileUrl);
-      await deleteObject(storageRef).catch((error) => {
-        console.error('Error deleting from storage:', error);
-        // Continue even if storage deletion fails
-      });
+      // Note: Cloudinary file deletion requires backend implementation
+      // Files remain in Cloudinary but are no longer referenced in the database
 
       // Log activity
       await activitiesAPI.logActivity(

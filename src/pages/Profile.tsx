@@ -19,10 +19,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuth } from '@/auth/AuthContext';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
-import { storage } from '@/lib/firebase';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { uploadToCloudinary } from '@/lib/cloudinary';
 import type { User } from '@/types';
 import { format } from 'date-fns';
 import { timestampToDate } from '@/lib/firestore';
@@ -114,50 +113,21 @@ export default function Profile() {
         return;
       }
 
-      // Create a simple storage path
-      const timestamp = Date.now();
-      const fileExt = file.name.split('.').pop() || 'jpg';
-      const fileName = `avatar-${timestamp}.${fileExt}`;
-      const storageRef = ref(storage, `avatars/${authUser.uid}/${fileName}`);
-      
-      // Use resumable upload for better reliability
-      const uploadTask = uploadBytesResumable(storageRef, file, {
-        contentType: file.type,
+      // Upload to Cloudinary
+      const result = await uploadToCloudinary(file, (progress) => {
+        console.log('Upload progress:', progress);
       });
-
-      // Track upload progress
-      uploadTask.on(
-        'state_changed',
-        (snapshot) => {
-          const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-          console.log('Upload progress:', progress);
-        },
-        (error) => {
-          console.error('Upload error:', error);
-          toast.error('Failed to upload avatar: ' + (error.message || 'Unknown error'));
-          setUploadingAvatar(false);
-        },
-        async () => {
-          // Upload complete
-          try {
-            const downloadURL = await getDownloadURL(storageRef);
-            setPreviewAvatar(downloadURL);
-            setFormData(prev => ({
-              ...prev,
-              avatar: downloadURL,
-            }));
-            toast.success('Avatar uploaded successfully');
-          } catch (error) {
-            console.error('Error getting download URL:', error);
-            toast.error('Failed to get avatar URL');
-          } finally {
-            setUploadingAvatar(false);
-          }
-        }
-      );
+      
+      setPreviewAvatar(result.secure_url);
+      setFormData(prev => ({
+        ...prev,
+        avatar: result.secure_url,
+      }));
+      toast.success('Avatar uploaded successfully');
     } catch (error) {
-      console.error('Error preparing avatar upload:', error);
+      console.error('Error uploading avatar:', error);
       toast.error('Failed to upload avatar');
+    } finally {
       setUploadingAvatar(false);
     }
   };

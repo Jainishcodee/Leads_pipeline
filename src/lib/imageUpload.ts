@@ -1,6 +1,5 @@
-// Image upload utilities for chat
-import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
-import { storage } from './firebase';
+// Image upload utilities for chat using Cloudinary
+import { uploadToCloudinary, formatFileSize } from './cloudinary';
 
 // Maximum file size: 5MB
 export const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
@@ -22,47 +21,18 @@ export async function uploadChatImage(
   }
 
   try {
-    const timestamp = Date.now();
-    const sanitizedName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
-    const fileName = `image_${leadId}_${senderId}_${timestamp}_${sanitizedName}`;
-    const storageRef = ref(storage, `chat-images/${leadId}/${fileName}`);
-    
-    // Upload with progress tracking
-    const uploadTask = uploadBytesResumable(storageRef, file, {
-      contentType: file.type,
+    const result = await uploadToCloudinary(file, {
+      folder: `mocha-pipeline/chat-images/${leadId}`,
+      resourceType: 'image',
+      onProgress,
+      tags: ['chat', 'lead', leadId, senderId]
     });
 
-    return new Promise((resolve, reject) => {
-      uploadTask.on(
-        'state_changed',
-        (snapshot) => {
-          const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-          onProgress?.(progress);
-        },
-        (error) => {
-          console.error('Error uploading image:', error);
-          reject(new Error('Failed to upload image'));
-        },
-        async () => {
-          try {
-            const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-            resolve(downloadURL);
-          } catch (error) {
-            reject(new Error('Failed to get download URL'));
-          }
-        }
-      );
-    });
+    return result.secure_url;
   } catch (error) {
     console.error('Error uploading image:', error);
-    throw error;
+    throw new Error('Failed to upload image');
   }
 }
 
-export function formatFileSize(bytes: number): string {
-  if (bytes === 0) return '0 Bytes';
-  const k = 1024;
-  const sizes = ['Bytes', 'KB', 'MB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
-}
+export { formatFileSize };
