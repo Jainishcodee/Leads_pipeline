@@ -26,7 +26,7 @@ export function FolderStatsCard({ stats, className }: FolderStatsCardProps) {
       </div>
       
       <div className="divide-y divide-border/50">
-        {stats.map((folder) => (
+        {stats.slice(0, 3).map((folder) => (
           <div 
             key={folder.folderId}
             className="p-4 hover:bg-muted/30 transition-colors cursor-pointer"
@@ -45,6 +45,11 @@ export function FolderStatsCard({ stats, className }: FolderStatsCardProps) {
             />
           </div>
         ))}
+        {stats.length > 3 && (
+          <div className="px-4 py-2 text-sm text-muted-foreground bg-muted/30">
+            +{stats.length - 3} more folders
+          </div>
+        )}
       </div>
     </div>
   );

@@ -40,9 +40,10 @@ import { format, formatDistanceToNow } from 'date-fns';
 interface LeadsTableProps {
   leads: Lead[];
   showFolder?: boolean;
+  totalLeads?: number; // For showing "+X more" indicator
 }
 
-export function LeadsTable({ leads, showFolder = false }: LeadsTableProps) {
+export function LeadsTable({ leads, showFolder = false, totalLeads }: LeadsTableProps) {
   const navigate = useNavigate();
   const { profile } = useAuth();
   const basePath = profile?.role === 'admin' ? '/admin' : '/dashboard';
@@ -299,6 +300,11 @@ export function LeadsTable({ leads, showFolder = false }: LeadsTableProps) {
               ))}
             </tbody>
           </table>
+          {totalLeads && totalLeads > leads.length && (
+            <div className="px-4 py-2 text-sm text-muted-foreground bg-muted/30 border-t border-border">
+              +{totalLeads - leads.length} more leads
+            </div>
+          )}
         </div>
         
         {leads.length === 0 && (

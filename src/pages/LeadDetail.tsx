@@ -73,6 +73,7 @@ import { useAuth } from '@/auth/AuthContext';
 import { timestampToDate } from '@/lib/firestore';
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 import { storage } from '@/lib/firebase';
+import { uploadVoiceRecording } from '@/lib/voiceRecording';
 
 export default function LeadDetail() {
   const { leadId } = useParams();
@@ -1518,17 +1519,49 @@ export default function LeadDetail() {
             messages={messages}
             leadId={leadId!}
             onClose={() => setChatOpen(false)}
-            onSendMessage={async (msg) => {
+            onSendMessage={async (msg, messageType = 'text', voiceBlob, voiceDuration, imageUrl, imageName) => {
               if (!leadId || !user) return;
 
               try {
-                await chatAPI.create({
-                  leadId,
-                  senderId: user.uid,
-                  senderName: user.displayName || user.email?.split('@')[0] || 'User',
-                  message: msg,
-                  organizationId: lead?.organizationId || profile?.organizationId || '',
-                });
+                const organizationId = lead?.organizationId || profile?.organizationId || '';
+                const senderName = user.displayName || user.email?.split('@')[0] || 'User';
+                
+                if (messageType === 'voice' && voiceBlob) {
+                  // Upload voice recording to Firebase Storage
+                  const voiceUrl = await uploadVoiceRecording(voiceBlob, leadId, user.uid);
+                  
+                  await chatAPI.create({
+                    leadId,
+                    senderId: user.uid,
+                    senderName,
+                    message: msg,
+                    messageType: 'voice',
+                    voiceUrl,
+                    voiceDuration,
+                    organizationId,
+                  });
+                } else if (messageType === 'image' && imageUrl) {
+                  await chatAPI.create({
+                    leadId,
+                    senderId: user.uid,
+                    senderName,
+                    message: imageName || 'Image',
+                    messageType: 'image',
+                    imageUrl,
+                    imageName,
+                    organizationId,
+                  });
+                } else {
+                  await chatAPI.create({
+                    leadId,
+                    senderId: user.uid,
+                    senderName,
+                    message: msg,
+                    messageType: 'text',
+                    organizationId,
+                  });
+                }
+                
                 await refetchMessages();
               } catch (error) {
                 console.error('Error sending message:', error);

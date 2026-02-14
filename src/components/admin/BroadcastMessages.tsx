@@ -11,6 +11,7 @@ import { collection, onSnapshot, orderBy, query, where, addDoc, serverTimestamp 
 import { db } from '@/lib/firebase';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { notificationsAPI, usersAPI } from '@/lib/api';
 
 interface BroadcastMessage {
   id: string;
@@ -110,13 +111,35 @@ export function BroadcastMessages({ organizationId, onClose }: BroadcastMessages
 
     try {
       setSending(true);
+      const senderName = user.displayName || profile?.name || 'Admin';
+      const messageText = newMessage.trim();
+      
+      // Send broadcast message
       await addDoc(collection(db, 'broadcastMessages'), {
         organizationId,
         senderId: user.uid,
-        senderName: user.displayName || profile?.name || 'Admin',
-        message: newMessage.trim(),
+        senderName,
+        message: messageText,
         createdAt: serverTimestamp(),
       });
+
+      // Get all team members (excluding the sender)
+      const teamMembers = await usersAPI.getAll(organizationId);
+      const recipients = teamMembers.filter(member => member.id !== user.uid);
+
+      // Create notifications for all team members
+      await Promise.all(
+        recipients.map(member =>
+          notificationsAPI.create({
+            userId: member.id,
+            organizationId,
+            type: 'broadcast',
+            title: 'New Broadcast Message',
+            message: `${senderName}: ${messageText}`,
+            read: false,
+          })
+        )
+      );
 
       setNewMessage('');
       toast.success('Broadcast message sent to all team members');

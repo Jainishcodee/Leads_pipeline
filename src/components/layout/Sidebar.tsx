@@ -14,7 +14,7 @@ import {
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/auth/AuthContext';
-import { useFolders } from '@/hooks/useFirebaseData';
+import { useFolders, useLeads } from '@/hooks/useFirebaseData';
 import { useFirestoreDoc } from '@/lib/useFirestore';
 import { CreateFolderModal } from '@/components/folders/CreateFolderModal';
 import { BroadcastMessages } from '@/components/admin/BroadcastMessages';
@@ -57,11 +57,19 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
   const { user, profile, signOut } = useAuth();
   const organizationId = profile?.organizationId || '';
   const { folders, loading: foldersLoading, refetch: refetchFolders } = useFolders(organizationId);
+  const { leads } = useLeads(organizationId, { role: profile?.role, userId: user?.uid });
   const { data: organization } = useFirestoreDoc<{ id: string; name?: string }>(
     'organizations',
     organizationId || null,
     { listen: true }
   );
+
+  // Calculate actual lead counts per folder
+  const folderLeadCounts = folders.reduce((acc, folder) => {
+    const count = leads.filter(lead => lead.folderId === folder.id).length;
+    acc[folder.id] = count;
+    return acc;
+  }, {} as Record<string, number>);
 
   const isActive = (path: string) => location.pathname === path;
   const isFolderActive = (folderId: string) => 
@@ -166,7 +174,7 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
                     >
                       <div className="w-2 h-2 rounded-full bg-mocha-400 flex-shrink-0" />
                       <span className="truncate flex-1">{folder.name}</span>
-                      <span className="text-xs text-muted-foreground">{folder.leadsCount}</span>
+                      <span className="text-xs text-muted-foreground">{folderLeadCounts[folder.id] || 0}</span>
                     </NavLink>
                   ))
                 )}

@@ -19,12 +19,13 @@ export function FollowUpsList({ leads, className }: FollowUpsListProps) {
   const { profile } = useAuth();
   const basePath = profile?.role === 'admin' ? '/admin' : '/dashboard';
 
-  const leadsWithFollowUp = leads
+  const allFollowUps = leads
     .filter(lead => lead.nextFollowUpDate && lead.status !== 'converted' && lead.status !== 'cancelled')
     .sort(
       (a, b) => timestampToDate(a.nextFollowUpDate!).getTime() - timestampToDate(b.nextFollowUpDate!).getTime()
-    )
-    .slice(0, 5);
+    );
+
+  const leadsWithFollowUp = allFollowUps.slice(0, 3);
 
   const getDateLabel = (date: Date) => {
     if (isPast(date) && !isToday(date)) return 'Overdue';
@@ -52,42 +53,49 @@ export function FollowUpsList({ leads, className }: FollowUpsListProps) {
             <p>No follow-ups scheduled</p>
           </div>
         ) : (
-          leadsWithFollowUp.map((lead) => {
-            const followUpDate = timestampToDate(lead.nextFollowUpDate!);
-            const isOverdue = isPast(followUpDate) && !isToday(followUpDate);
-            
-            return (
-              <div 
-                key={lead.id}
-                className="p-4 hover:bg-muted/30 transition-colors cursor-pointer"
-                onClick={() => navigate(`${basePath}/leads/${lead.id}`)}
-              >
-                <div className="flex items-center gap-3">
-                  <Avatar className="w-10 h-10">
-                    <AvatarFallback className="bg-mocha-100 text-mocha-700 text-sm">
-                      {lead.companyName.substring(0, 2).toUpperCase()}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium truncate">{lead.companyName}</p>
-                    <p className="text-sm text-muted-foreground truncate">
-                      {lead.managerName}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <div className={cn(
-                      'flex items-center gap-1 text-sm font-medium',
-                      isOverdue ? 'text-destructive' : isToday(followUpDate) ? 'text-mocha-600' : 'text-muted-foreground'
-                    )}>
-                      <Clock className="w-3.5 h-3.5" />
-                      {getDateLabel(followUpDate)}
+          <>
+            {leadsWithFollowUp.map((lead) => {
+              const followUpDate = timestampToDate(lead.nextFollowUpDate!);
+              const isOverdue = isPast(followUpDate) && !isToday(followUpDate);
+              
+              return (
+                <div 
+                  key={lead.id}
+                  className="p-4 hover:bg-muted/30 transition-colors cursor-pointer"
+                  onClick={() => navigate(`${basePath}/leads/${lead.id}`)}
+                >
+                  <div className="flex items-center gap-3">
+                    <Avatar className="w-10 h-10">
+                      <AvatarFallback className="bg-mocha-100 text-mocha-700 text-sm">
+                        {lead.companyName.substring(0, 2).toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium truncate">{lead.companyName}</p>
+                      <p className="text-sm text-muted-foreground truncate">
+                        {lead.managerName}
+                      </p>
                     </div>
-                    <StatusBadge status={lead.status} className="mt-1" />
+                    <div className="text-right">
+                      <div className={cn(
+                        'flex items-center gap-1 text-sm font-medium',
+                        isOverdue ? 'text-destructive' : isToday(followUpDate) ? 'text-mocha-600' : 'text-muted-foreground'
+                      )}>
+                        <Clock className="w-3.5 h-3.5" />
+                        {getDateLabel(followUpDate)}
+                      </div>
+                      <StatusBadge status={lead.status} className="mt-1" />
+                    </div>
                   </div>
                 </div>
+              );
+            })}
+            {allFollowUps.length > 3 && (
+              <div className="px-4 py-2 text-sm text-muted-foreground bg-muted/30">
+                +{allFollowUps.length - 3} more follow-ups
               </div>
-            );
-          })
+            )}
+          </>
         )}
       </div>
     </div>

@@ -10,6 +10,7 @@ import { KPICard } from '@/components/dashboard/KPICard';
 import { FollowUpsList } from '@/components/dashboard/FollowUpsList';
 import { FolderStatsCard } from '@/components/dashboard/FolderStatsCard';
 import { LeadsTable } from '@/components/leads/LeadsTable';
+import { EmployeeTasksCard } from '@/components/dashboard/EmployeeTasksCard';
 import { useLeads, useFolders } from '@/hooks/useFirebaseData';
 import { useAuth } from '@/auth/AuthContext';
 import { timestampToDate } from '@/lib/firestore';
@@ -81,7 +82,7 @@ export default function Dashboard() {
   // Get recent leads
   const recentLeads = [...leads]
     .sort((a, b) => new Date(b.lastActivityAt).getTime() - new Date(a.lastActivityAt).getTime())
-    .slice(0, 5);
+    .slice(0, 3);
 
   return (
     <div className="p-4 md:p-6 lg:p-8 space-y-6 md:space-y-8 max-w-7xl mx-auto">
@@ -127,23 +128,32 @@ export default function Dashboard() {
       </div>
 
       {/* Main content grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Follow-ups & Stats */}
-        <div className="space-y-6">
+      <div className="space-y-6">
+        {/* Top row: Follow-ups and Recent Leads */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Left: Today's Follow-ups */}
           <FollowUpsList leads={leads} />
-          <FolderStatsCard stats={folderStats} />
-        </div>
 
-        {/* Recent Activity */}
-        <div className="lg:col-span-2">
-          <div className="card-premium">
+          {/* Right: Recent Leads - spans 2 columns */}
+          <div className="lg:col-span-2 card-premium">
             <div className="p-4 border-b border-border">
               <h3 className="font-semibold">Recent Leads</h3>
               <p className="text-sm text-muted-foreground mt-0.5">
                 Latest activity across all folders
               </p>
             </div>
-            <LeadsTable leads={recentLeads} showFolder />
+            <LeadsTable leads={recentLeads} showFolder totalLeads={leads.length} />
+          </div>
+        </div>
+
+        {/* Bottom row: Folder Performance and Employee Tasks */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Left: Folder Performance */}
+          <FolderStatsCard stats={folderStats} />
+
+          {/* Right: Employee Tasks - spans 2 columns */}
+          <div className="lg:col-span-2">
+            <EmployeeTasksCard organizationId={organizationId} />
           </div>
         </div>
       </div>

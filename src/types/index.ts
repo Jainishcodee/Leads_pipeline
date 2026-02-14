@@ -158,6 +158,11 @@ export interface ChatMessage {
   senderName: string;
   senderAvatar?: string;
   message: string;
+  messageType?: 'text' | 'voice' | 'image'; // Type of message
+  voiceUrl?: string; // URL to voice recording in Firebase Storage
+  voiceDuration?: number; // Duration in seconds
+  imageUrl?: string; // URL to image in Firebase Storage
+  imageName?: string; // Original image file name
   mentions?: string[]; // user IDs
   attachments?: Attachment[];
   isSystemMessage?: boolean;
@@ -192,7 +197,7 @@ export interface Notification {
   id: string;
   userId: string;
   organizationId: string;
-  type: 'assignment' | 'task' | 'mention' | 'status_change' | 'due_soon' | 'invite' | 'invite_accept' | 'invite_reject' | 'chat' | 'lead' | 'activity';
+  type: 'assignment' | 'task' | 'mention' | 'status_change' | 'due_soon' | 'invite' | 'invite_accept' | 'invite_reject' | 'chat' | 'lead' | 'activity' | 'broadcast';
   title: string;
   message: string;
   leadId?: string;
