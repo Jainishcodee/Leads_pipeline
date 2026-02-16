@@ -98,6 +98,16 @@ export default function LeadDetail() {
   const [selectedMemberFilter, setSelectedMemberFilter] = useState<string>('all');
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  
+  // Validate leadId immediately
+  useEffect(() => {
+    if (!leadId) {
+      setErrorMessage('Invalid lead ID');
+    } else {
+      setErrorMessage(null);
+    }
+  }, [leadId]);
   
   const { lead, loading: leadLoading, refetch: refetchLead } = useLead(leadId);
   const organizationId = lead?.organizationId || profile?.organizationId || '';
@@ -124,8 +134,8 @@ export default function LeadDetail() {
 
   const toDate = (value: unknown) => (value ? timestampToDate(value) : null);
   
-  const userById = new Map(users.map((member) => [member.id, member]));
-  const teamOptions = users;
+  const userById = new Map((users || []).map((member) => [member.id, member]));
+  const teamOptions = users || [];
   const isAdmin = profile?.role === 'admin';
   
   // Filter tasks, activities, and attachments based on selected member
@@ -172,6 +182,19 @@ export default function LeadDetail() {
       window.removeEventListener('popstate', handlePopState);
     };
   }, [chatOpen]);
+
+  useEffect(() => {
+    // Global error handler for component
+    const handleError = (event: ErrorEvent) => {
+      console.error('Component error:', event.error);
+      setErrorMessage(`An error occurred: ${event.error?.message || 'Unknown error'}`);
+    };
+
+    window.addEventListener('error', handleError);
+    return () => {
+      window.removeEventListener('error', handleError);
+    };
+  }, []);
 
   // Mark messages as read when chat opens
   useEffect(() => {
@@ -774,6 +797,21 @@ export default function LeadDetail() {
     }
   }, [lead]);
 
+  if (errorMessage) {
+    return (
+      <div className="p-8 text-center">
+        <p className="text-destructive font-medium">{errorMessage}</p>
+        <Button 
+          variant="outline" 
+          className="mt-4"
+          onClick={() => navigate(-1)}
+        >
+          Go Back
+        </Button>
+      </div>
+    );
+  }
+
   if (leadLoading || tasksLoading || activitiesLoading) {
     return (
       <div className="p-8 flex items-center justify-center">
@@ -818,7 +856,7 @@ export default function LeadDetail() {
               </Button>
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <h1 className="text-lg md:text-2xl font-semibold truncate">{lead.companyName}</h1>
+                  <h1 className="text-lg md:text-2xl font-semibold truncate">{lead?.companyName || 'Unknown Company'}</h1>
                   <div className="flex items-center gap-2">
                     <StatusBadge status={lead.status} />
                     <PriorityBadge priority={lead.priority} />
@@ -827,10 +865,10 @@ export default function LeadDetail() {
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-xs md:text-sm text-muted-foreground">
                   <span className="flex items-center gap-1.5">
                     <MapPin className="w-3 h-3 md:w-4 md:h-4" />
-                    {lead.location}
+                    {lead?.location || 'Not specified'}
                   </span>
                   <span className="hidden sm:inline">•</span>
-                  <span className="hidden sm:inline">{lead.folderName}</span>
+                  <span className="hidden sm:inline">{lead?.folderName || 'No folder'}</span>
                   <span className="hidden md:inline">•</span>
                   <span className="hidden md:inline">
                     Created{' '}
@@ -957,18 +995,18 @@ export default function LeadDetail() {
                 <div className="space-y-3 text-sm">
                   <div>
                     <p className="text-muted-foreground">Address</p>
-                    <p className="mt-0.5">{lead.completeAddress}</p>
+                    <p className="mt-0.5">{lead?.completeAddress || 'Not provided'}</p>
                   </div>
                   <div>
                     <p className="text-muted-foreground">Email</p>
-                    <a href={`mailto:${lead.emailId}`} className="text-primary hover:underline mt-0.5 block">
-                      {lead.emailId}
+                    <a href={`mailto:${lead?.emailId || ''}`} className="text-primary hover:underline mt-0.5 block">
+                      {lead?.emailId || 'Not provided'}
                     </a>
                   </div>
                   <div>
                     <p className="text-muted-foreground">WhatsApp</p>
-                    <a href={`https://wa.me/${lead.whatsappNumber.replace(/\+/g, '')}`} className="text-primary hover:underline mt-0.5 block">
-                      {lead.whatsappNumber}
+                    <a href={`https://wa.me/${lead?.whatsappNumber?.replace(/\+/g, '') || ''}`} className="text-primary hover:underline mt-0.5 block">
+                      {lead?.whatsappNumber || 'Not provided'}
                     </a>
                   </div>
                 </div>
@@ -986,24 +1024,24 @@ export default function LeadDetail() {
                 <div className="flex items-center gap-3">
                   <Avatar className="w-12 h-12">
                     <AvatarFallback className="bg-mocha-100 text-mocha-700">
-                      {lead.managerName.split(' ').map(n => n[0]).join('')}
+                      {(lead?.managerName || 'N/A').split(' ').map(n => n[0]).join('')}
                     </AvatarFallback>
                   </Avatar>
                   <div>
-                    <p className="font-medium">{lead.managerName}</p>
-                    <p className="text-sm text-muted-foreground">{lead.managerEmail}</p>
+                    <p className="font-medium">{lead?.managerName || 'Not specified'}</p>
+                    <p className="text-sm text-muted-foreground">{lead?.managerEmail || 'Not provided'}</p>
                   </div>
                 </div>
 
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" className="flex-1" asChild>
-                    <a href={`tel:${lead.managerPhone}`}>
+                    <a href={`tel:${lead?.managerPhone || ''}`}>
                       <Phone className="w-4 h-4 mr-1.5" />
                       Call
                     </a>
                   </Button>
                   <Button variant="outline" size="sm" className="flex-1" asChild>
-                    <a href={`https://wa.me/${lead.managerWhatsapp.replace(/\+/g, '')}`}>
+                    <a href={`https://wa.me/${lead?.managerWhatsapp?.replace(/\+/g, '') || ''}`}>
                       <MessageCircle className="w-4 h-4 mr-1.5" />
                       WhatsApp
                     </a>
@@ -1021,7 +1059,7 @@ export default function LeadDetail() {
                 <div>
                   <p className="text-sm text-muted-foreground mb-2">Products Interested</p>
                   <div className="flex flex-wrap gap-2">
-                    {lead.interest.map((item, i) => (
+                    {(lead?.interest || []).map((item, i) => (
                       <Badge key={i} variant="secondary" className="bg-mocha-100 text-mocha-700">
                         {item}
                       </Badge>
@@ -1029,11 +1067,11 @@ export default function LeadDetail() {
                   </div>
                 </div>
 
-                {lead.tags.length > 0 && (
+                {(lead?.tags || []).length > 0 && (
                   <div>
                     <p className="text-sm text-muted-foreground mb-2">Tags</p>
                     <div className="flex flex-wrap gap-2">
-                      {lead.tags.map((tag, i) => (
+                      {(lead?.tags || []).map((tag, i) => (
                         <Badge key={i} variant="outline">
                           {tag}
                         </Badge>
@@ -1042,7 +1080,7 @@ export default function LeadDetail() {
                   </div>
                 )}
 
-                {lead.valueEstimate && (
+                {(lead?.valueEstimate) && (
                   <div>
                     <p className="text-sm text-muted-foreground">Estimated Value</p>
                     <p className="text-lg font-semibold text-mocha-600 flex items-center gap-1">
@@ -1504,7 +1542,9 @@ export default function LeadDetail() {
 
               try {
                 const organizationId = lead?.organizationId || profile?.organizationId || '';
-                const senderName = user.displayName || user.email?.split('@')[0] || 'User';
+                const senderName = profile?.name || user.displayName || user.email?.split('@')[0] || 'User';
+                const senderAvatar = profile?.avatar || '';
+                const senderRole = profile?.role || 'member';
                 
                 if (messageType === 'voice' && voiceBlob) {
                   // Upload voice recording to Firebase Storage
@@ -1514,6 +1554,8 @@ export default function LeadDetail() {
                     leadId,
                     senderId: user.uid,
                     senderName,
+                    senderAvatar,
+                    senderRole,
                     message: msg,
                     messageType: 'voice',
                     voiceUrl,
@@ -1525,6 +1567,8 @@ export default function LeadDetail() {
                     leadId,
                     senderId: user.uid,
                     senderName,
+                    senderAvatar,
+                    senderRole,
                     message: imageName || 'Image',
                     messageType: 'image',
                     imageUrl,
@@ -1536,6 +1580,8 @@ export default function LeadDetail() {
                     leadId,
                     senderId: user.uid,
                     senderName,
+                    senderAvatar,
+                    senderRole,
                     message: msg,
                     messageType: 'text',
                     organizationId,

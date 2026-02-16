@@ -19,6 +19,7 @@ import SignUp from "@/pages/SignUp";
 import { AuthProvider, useAuth } from "@/auth/AuthContext";
 import { ProtectedRoute, PublicOnlyRoute, AdminRoute, SuperAdminRoute } from "@/auth/ProtectedRoute";
 import SuperAdminDashboard from "@/pages/SuperAdmin";
+import { initializeCapacitor } from "@/lib/capacitor";
 
 const queryClient = new QueryClient();
 
@@ -56,48 +57,58 @@ const RootRedirect = () => {
   return null;
 };
 
-const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <AuthProvider>
-        <BrowserRouter>
-          <Routes>
-            <Route element={<PublicOnlyRoute />}>
-              <Route path="/login" element={<Login />} />
-              <Route path="/signup" element={<SignUp />} />
-            </Route>
-            <Route element={<ProtectedRoute />}>
-              <Route path="/dashboard" element={<AppLayout />}>
-                <Route index element={<Dashboard />} />
-                <Route path="folders/:folderId" element={<FolderView />} />
-                <Route path="leads/:leadId" element={<LeadDetail />} />
-                <Route path="team" element={<Team />} />
-                <Route path="settings" element={<Settings />} />
-                <Route path="profile" element={<Profile />} />
+const App = () => {
+  // Initialize Capacitor plugins on app mount
+  useEffect(() => {
+    initializeCapacitor().catch((error) => {
+      // Log but don't crash if initialization fails
+      console.error("Failed to initialize Capacitor:", error);
+    });
+  }, []);
+
+  return (
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <AuthProvider>
+          <BrowserRouter>
+            <Routes>
+              <Route element={<PublicOnlyRoute />}>
+                <Route path="/login" element={<Login />} />
+                <Route path="/signup" element={<SignUp />} />
               </Route>
-            </Route>
-            <Route element={<AdminRoute />}>
-              <Route element={<AdminLayout />}>
-                <Route path="/admin" element={<AdminDashboard />} />
-                <Route path="/admin/leads/:leadId" element={<LeadDetail />} />
-                <Route path="/admin/folders/:folderId" element={<FolderView />} />
-                <Route path="/admin/team" element={<Team />} />
-                <Route path="/admin/settings" element={<Settings />} />
-                <Route path="/admin/profile" element={<Profile />} />
+              <Route element={<ProtectedRoute />}>
+                <Route path="/dashboard" element={<AppLayout />}>
+                  <Route index element={<Dashboard />} />
+                  <Route path="folders/:folderId" element={<FolderView />} />
+                  <Route path="leads/:leadId" element={<LeadDetail />} />
+                  <Route path="team" element={<Team />} />
+                  <Route path="settings" element={<Settings />} />
+                  <Route path="profile" element={<Profile />} />
+                </Route>
               </Route>
-            </Route>
-            <Route element={<SuperAdminRoute />}>
-              <Route path="/super-admin" element={<SuperAdminDashboard />} />
-            </Route>
-            <Route path="/" element={<RootRedirect />} />
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </BrowserRouter>
-      </AuthProvider>
-    </TooltipProvider>
-  </QueryClientProvider>
-);
+              <Route element={<AdminRoute />}>
+                <Route element={<AdminLayout />}>
+                  <Route path="/admin" element={<AdminDashboard />} />
+                  <Route path="/admin/leads/:leadId" element={<LeadDetail />} />
+                  <Route path="/admin/folders/:folderId" element={<FolderView />} />
+                  <Route path="/admin/team" element={<Team />} />
+                  <Route path="/admin/settings" element={<Settings />} />
+                  <Route path="/admin/profile" element={<Profile />} />
+                </Route>
+              </Route>
+              <Route element={<SuperAdminRoute />}>
+                <Route path="/super-admin" element={<SuperAdminDashboard />} />
+              </Route>
+              <Route path="/" element={<RootRedirect />} />
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </BrowserRouter>
+        </AuthProvider>
+      </TooltipProvider>
+    </QueryClientProvider>
+  );
+};
 
 export default App;

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Mail, Phone, MessageCircle, Shield, User, Eye, Plus, Clock, Edit } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { useUsers } from '@/hooks/useFirebaseData';
 import { useAuth } from '@/auth/AuthContext';
@@ -17,7 +17,7 @@ const roleConfig = {
   admin: { 
     label: 'Admin', 
     icon: Shield, 
-    className: 'bg-mocha-100 text-mocha-700' 
+    className: 'bg-green-200 text-mocha-700' 
   },
   member: { 
     label: 'Member', 
@@ -231,6 +231,7 @@ export default function Team() {
                 <div className="flex items-start justify-between">
                   <div className="flex items-center gap-3">
                     <Avatar className="w-12 h-12">
+                      <AvatarImage src={user.avatar || ''} alt={user.name} />
                       <AvatarFallback className="bg-mocha-100 text-mocha-700">
                         {initials}
                       </AvatarFallback>

@@ -68,31 +68,31 @@ export function VoiceMessagePlayer({ voiceUrl, duration, isSelf = false }: Voice
 
   return (
     <div className={cn(
-      'flex items-center gap-2 p-2 rounded-lg min-w-[200px]',
-      isSelf ? 'bg-mocha-100/30' : 'bg-muted/50'
+      'flex items-center gap-2 rounded-lg max-w-[240px]',
+      isSelf ? 'bg-transparent' : 'bg-transparent'
     )}>
       <Button
         variant="ghost"
         size="icon"
-        className="h-8 w-8 flex-shrink-0"
+        className="h-7 w-7 flex-shrink-0"
         onClick={togglePlayPause}
         disabled={isLoading}
       >
         {isPlaying ? (
-          <Pause className="w-4 h-4" />
+          <Pause className="w-3.5 h-3.5" />
         ) : (
-          <Play className="w-4 h-4" />
+          <Play className="w-3.5 h-3.5" />
         )}
       </Button>
       
-      <div className="flex-1 flex flex-col gap-1">
-        <div className="relative w-full h-1 bg-muted-foreground/20 rounded-full overflow-hidden">
+      <div className="flex-1 flex items-center gap-2">
+        <div className="relative flex-1 h-1 bg-muted-foreground/20 rounded-full overflow-hidden">
           <div 
             className="absolute left-0 top-0 h-full bg-mocha-600 transition-all"
             style={{ width: `${progress}%` }}
           />
         </div>
-        <div className="text-xs text-muted-foreground">
+        <div className="text-xs text-muted-foreground whitespace-nowrap">
           {formatDuration(Math.floor(currentTime))} / {formatDuration(duration)}
         </div>
       </div>

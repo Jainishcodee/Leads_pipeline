@@ -16,6 +16,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { PhoneInput } from '@/components/ui/phone-input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { ImageCropModal } from '@/components/ui/image-crop-modal';
 import { useAuth } from '@/auth/AuthContext';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
@@ -43,6 +44,8 @@ export default function Profile() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [cropModalOpen, setCropModalOpen] = useState(false);
+  const [selectedImageSrc, setSelectedImageSrc] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -93,28 +96,46 @@ export default function Profile() {
     fetchUser();
   }, [authUser?.uid]);
 
-  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAvatarSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !authUser?.uid) return;
+    if (!file) return;
+
+    // Validate file type and size
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please select an image file');
+      return;
+    }
+    
+    if (file.size > 5 * 1024 * 1024) { // 5MB max
+      toast.error('Image must be less than 5MB');
+      return;
+    }
+
+    // Create preview URL and open crop modal
+    const reader = new FileReader();
+    reader.onload = () => {
+      setSelectedImageSrc(reader.result as string);
+      setCropModalOpen(true);
+    };
+    reader.readAsDataURL(file);
+    
+    // Reset the input value so the same file can be selected again
+    e.target.value = '';
+  };
+
+  const handleCropComplete = async (croppedImageBlob: Blob) => {
+    if (!authUser?.uid) return;
 
     try {
       setUploadingAvatar(true);
       
-      // Validate file type and size
-      if (!file.type.startsWith('image/')) {
-        toast.error('Please select an image file');
-        setUploadingAvatar(false);
-        return;
-      }
-      
-      if (file.size > 5 * 1024 * 1024) { // 5MB max
-        toast.error('Image must be less than 5MB');
-        setUploadingAvatar(false);
-        return;
-      }
+      // Create a File object from the blob
+      const croppedFile = new File([croppedImageBlob], 'avatar.jpg', {
+        type: 'image/jpeg',
+      });
 
       // Upload to Cloudinary
-      const result = await uploadToCloudinary(file, (progress) => {
+      const result = await uploadToCloudinary(croppedFile, (progress) => {
         console.log('Upload progress:', progress);
       });
       
@@ -123,6 +144,9 @@ export default function Profile() {
         ...prev,
         avatar: result.secure_url,
       }));
+      
+      setCropModalOpen(false);
+      setSelectedImageSrc(null);
       toast.success('Avatar uploaded successfully');
     } catch (error) {
       console.error('Error uploading avatar:', error);
@@ -239,7 +263,7 @@ export default function Profile() {
               <input
                 type="file"
                 accept="image/*"
-                onChange={handleAvatarUpload}
+                onChange={handleAvatarSelect}
                 disabled={uploadingAvatar}
                 className="hidden"
               />
@@ -428,6 +452,22 @@ export default function Profile() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Image Crop Modal */}
+      {selectedImageSrc && (
+        <ImageCropModal
+          open={cropModalOpen}
+          onOpenChange={(open) => {
+            setCropModalOpen(open);
+            if (!open) {
+              setSelectedImageSrc(null);
+            }
+          }}
+          imageSrc={selectedImageSrc}
+          onCropComplete={handleCropComplete}
+          isUploading={uploadingAvatar}
+        />
+      )}
     </div>
   );
 }

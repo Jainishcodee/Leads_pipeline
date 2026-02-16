@@ -142,7 +142,12 @@ export default function Dashboard() {
                 Latest activity across all folders
               </p>
             </div>
-            <LeadsTable leads={recentLeads} showFolder totalLeads={leads.length} />
+            <LeadsTable 
+              leads={recentLeads} 
+              showFolder 
+              totalLeads={leads.length}
+              emptyMessage="No leads yet!"
+            />
           </div>
         </div>
 

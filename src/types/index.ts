@@ -157,6 +157,7 @@ export interface ChatMessage {
   senderId: string;
   senderName: string;
   senderAvatar?: string;
+  senderRole?: UserRole; // Role of the sender
   message: string;
   messageType?: 'text' | 'voice' | 'image'; // Type of message
   voiceUrl?: string; // URL to voice recording in Firebase Storage

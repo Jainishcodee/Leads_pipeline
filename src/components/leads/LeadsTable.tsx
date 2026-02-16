@@ -41,9 +41,10 @@ interface LeadsTableProps {
   leads: Lead[];
   showFolder?: boolean;
   totalLeads?: number; // For showing "+X more" indicator
+  emptyMessage?: string; // Custom message when no leads
 }
 
-export function LeadsTable({ leads, showFolder = false, totalLeads }: LeadsTableProps) {
+export function LeadsTable({ leads, showFolder = false, totalLeads, emptyMessage = 'No leads found' }: LeadsTableProps) {
   const navigate = useNavigate();
   const { profile } = useAuth();
   const basePath = profile?.role === 'admin' ? '/admin' : '/dashboard';
@@ -309,7 +310,7 @@ export function LeadsTable({ leads, showFolder = false, totalLeads }: LeadsTable
         
         {leads.length === 0 && (
           <div className="p-12 text-center">
-            <p className="text-muted-foreground">No leads found</p>
+            <p className="text-muted-foreground">{emptyMessage}</p>
           </div>
         )}
       </div>

@@ -33,7 +33,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
   Tooltip,
   TooltipContent,
@@ -275,6 +275,7 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
                 )}
               >
                 <Avatar className="w-9 h-9 flex-shrink-0">
+                  <AvatarImage src={profile?.avatar} />
                   <AvatarFallback className="bg-mocha-200 text-mocha-700 text-sm">
                     {(displayName || 'U').split(' ').map(n => n[0]).join('')}
                   </AvatarFallback>

@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { X, Send, Paperclip, Mic, StopCircle, Smile, Image as ImageIcon, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { cn } from '@/lib/utils';
 import type { ChatMessage } from '@/types';
 import { useAuth } from '@/auth/AuthContext';
@@ -239,6 +239,7 @@ export function ChatPanel({ messages, leadId, onClose, onSendMessage }: ChatPane
                   >
                     {!isSelf && (
                       <Avatar className="w-8 h-8 flex-shrink-0">
+                        <AvatarImage src={message.senderAvatar} />
                         <AvatarFallback className="bg-mocha-100 text-mocha-700 text-xs">
                           {message.senderName.split(' ').map(n => n[0]).join('')}
                         </AvatarFallback>
@@ -246,9 +247,16 @@ export function ChatPanel({ messages, leadId, onClose, onSendMessage }: ChatPane
                     )}
                     <div className={cn('flex flex-col', isSelf && 'items-end')}>
                       {!isSelf && (
-                        <span className="text-xs text-muted-foreground mb-1 ml-1">
-                          {message.senderName}
-                        </span>
+                        <div className="flex items-center gap-1.5 mb-1 ml-1">
+                          <span className="text-xs text-muted-foreground">
+                            {message.senderName}
+                          </span>
+                          {(message.senderRole === 'admin' || message.senderRole === 'superadmin') && (
+                            <span className="text-xs text-blue-600 font-medium">
+                              ({message.senderRole === 'superadmin' ? 'Super Admin' : 'Admin'})
+                            </span>
+                          )}
+                        </div>
                       )}
                       <div className={cn(
                         isSelf ? 'chat-bubble-self' : 'chat-bubble-other'
