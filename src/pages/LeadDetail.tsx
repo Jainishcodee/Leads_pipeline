@@ -63,7 +63,7 @@ import { StatusBadge } from '@/components/leads/StatusBadge';
 import { PriorityBadge } from '@/components/leads/PriorityBadge';
 import { CreateLeadModal } from '@/components/leads/CreateLeadModal';
 import { ChatPanel } from '@/components/chat/ChatPanel';
-import { format, formatDistanceToNow } from 'date-fns';
+import { format, formatDistanceToNow, isValid } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import type { ActivityLog, LeadAttachment } from '@/types';
@@ -133,10 +133,21 @@ export default function LeadDetail() {
   const [savingNotes, setSavingNotes] = useState(false);
 
   const toDate = (value: unknown) => (value ? timestampToDate(value) : null);
+
+  const safeFormatDate = (value: unknown, dateFormat: string) => {
+    const date = timestampToDate(value);
+    return isValid(date) ? format(date, dateFormat) : '—';
+  };
+
+  const safeDistanceToNow = (value: unknown) => {
+    const date = timestampToDate(value);
+    return isValid(date) ? formatDistanceToNow(date, { addSuffix: true }) : '—';
+  };
   
   const userById = new Map((users || []).map((member) => [member.id, member]));
   const teamOptions = users || [];
   const isAdmin = profile?.role === 'admin';
+  const canPinMessages = profile?.role === 'admin' || profile?.role === 'superadmin';
   
   // Filter tasks, activities, and attachments based on selected member
   const filteredTasks = selectedMemberFilter === 'all' 
@@ -872,9 +883,7 @@ export default function LeadDetail() {
                   <span className="hidden md:inline">•</span>
                   <span className="hidden md:inline">
                     Created{' '}
-                    {toDate(lead.createdAt)
-                      ? formatDistanceToNow(toDate(lead.createdAt)!, { addSuffix: true })
-                      : '—'}
+                    {safeDistanceToNow(lead.createdAt)}
                   </span>
                 </div>
               </div>
@@ -1246,7 +1255,7 @@ export default function LeadDetail() {
                                   {task.dueDate && (
                                     <span className="flex items-center gap-1">
                                       <Calendar className="w-3 h-3" />
-                                      {format(timestampToDate(task.dueDate), 'MMM d')}
+                                      {safeFormatDate(task.dueDate, 'MMM d')}
                                     </span>
                                   )}
                                 </div>
@@ -1362,7 +1371,7 @@ export default function LeadDetail() {
                                   <span className="text-muted-foreground">{activity.description}</span>
                                 </p>
                                 <p className="text-xs text-muted-foreground mt-0.5">
-                                  {formatDistanceToNow(timestampToDate(activity.createdAt), { addSuffix: true })}
+                                  {safeDistanceToNow(activity.createdAt)}
                                 </p>
                               </div>
                             </div>
@@ -1491,7 +1500,7 @@ export default function LeadDetail() {
                                   <span>{attachment.fileType || 'Unknown type'}</span>
                                   <span>{formatFileSize(attachment.fileSize)}</span>
                                   <span>
-                                    {format(attachment.createdAt, 'MMM d, yyyy • h:mm a')}
+                                    {safeFormatDate(attachment.createdAt, 'MMM d, yyyy • h:mm a')}
                                   </span>
                                   <span>by {attachment.uploadedByName}</span>
                                 </div>
@@ -1537,7 +1546,42 @@ export default function LeadDetail() {
             messages={messages}
             leadId={leadId!}
             onClose={() => setChatOpen(false)}
-            onSendMessage={async (msg, messageType = 'text', voiceBlob, voiceDuration, imageUrl, imageName) => {
+            canPinMessages={canPinMessages}
+            onPinMessage={async (messageId) => {
+              if (!leadId || !user || !canPinMessages) return;
+
+              try {
+                const pinByName = profile?.name || user.displayName || user.email?.split('@')[0] || 'Admin';
+                await chatAPI.pinMessage(leadId, messageId, user.uid, pinByName);
+                await refetchMessages();
+                toast.success('Message pinned');
+              } catch (error) {
+                console.error('Error pinning message:', error);
+                toast.error('Failed to pin message');
+              }
+            }}
+            onUnpinMessage={async (messageId) => {
+              if (!canPinMessages) return;
+
+              try {
+                await chatAPI.unpinMessage(messageId);
+                await refetchMessages();
+                toast.success('Message unpinned');
+              } catch (error) {
+                console.error('Error unpinning message:', error);
+                toast.error('Failed to unpin message');
+              }
+            }}
+            onSendMessage={async (
+              msg,
+              messageType = 'text',
+              voiceBlob,
+              voiceDuration,
+              imageUrl,
+              imageName,
+              replyToMessageId,
+              replyToMessagePreview
+            ) => {
               if (!leadId || !user) return;
 
               try {
@@ -1560,6 +1604,8 @@ export default function LeadDetail() {
                     messageType: 'voice',
                     voiceUrl,
                     voiceDuration,
+                    replyToMessageId,
+                    replyToMessagePreview,
                     organizationId,
                   });
                 } else if (messageType === 'image' && imageUrl) {
@@ -1573,6 +1619,8 @@ export default function LeadDetail() {
                     messageType: 'image',
                     imageUrl,
                     imageName,
+                    replyToMessageId,
+                    replyToMessagePreview,
                     organizationId,
                   });
                 } else {
@@ -1584,6 +1632,8 @@ export default function LeadDetail() {
                     senderRole,
                     message: msg,
                     messageType: 'text',
+                    replyToMessageId,
+                    replyToMessagePreview,
                     organizationId,
                   });
                 }

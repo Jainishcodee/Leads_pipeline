@@ -152,7 +152,14 @@ export function BroadcastMessages({ organizationId, onClose }: BroadcastMessages
   };
 
   return (
-    <div ref={panelRef} className="fixed inset-0 md:inset-y-0 md:right-0 md:left-auto md:w-96 z-50 md:top-16 bg-background border-l flex flex-col">
+    <div
+      ref={panelRef}
+      className="fixed inset-0 md:inset-y-0 md:right-0 md:left-auto md:w-96 z-50 md:top-16 bg-background border-l flex flex-col"
+      style={{
+        paddingTop: 'var(--app-safe-top, env(safe-area-inset-top, 0px))',
+        paddingBottom: 'var(--app-safe-bottom, env(safe-area-inset-bottom, 0px))',
+      }}
+    >
       {/* Header */}
       <div className="border-b p-4 flex items-center justify-between">
         <div className="flex items-center gap-2">

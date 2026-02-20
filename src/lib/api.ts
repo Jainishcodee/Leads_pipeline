@@ -222,6 +222,37 @@ export const chatAPI = {
     ]);
   },
 
+  async pinMessage(leadId: string, messageId: string, pinnedById: string, pinnedByName: string) {
+    const messages = await this.getByLead(leadId);
+    const currentlyPinned = messages.filter((msg) => msg.isPinned && msg.id !== messageId);
+
+    await Promise.all([
+      ...currentlyPinned.map((msg) =>
+        updateDocument(COLLECTIONS.CHAT_MESSAGES, msg.id, {
+          isPinned: false,
+          pinnedById: null,
+          pinnedByName: null,
+          pinnedAt: null,
+        })
+      ),
+      updateDocument(COLLECTIONS.CHAT_MESSAGES, messageId, {
+        isPinned: true,
+        pinnedById,
+        pinnedByName,
+        pinnedAt: new Date(),
+      }),
+    ]);
+  },
+
+  async unpinMessage(messageId: string) {
+    return updateDocument(COLLECTIONS.CHAT_MESSAGES, messageId, {
+      isPinned: false,
+      pinnedById: null,
+      pinnedByName: null,
+      pinnedAt: null,
+    });
+  },
+
   async markMessagesAsRead(leadId: string, userId: string) {
     const messages = await this.getByLead(leadId);
     const unreadMessages = messages.filter(msg => 

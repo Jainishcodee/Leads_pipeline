@@ -7,9 +7,17 @@ import { useAuth } from '@/auth/AuthContext';
 import { timestampToDate, buildLeadsQuery, buildTasksQuery, buildActivitiesQuery } from '@/lib/firestore';
 import { useFirestoreCollection } from '@/lib/useFirestore';
 
-export function useLeads(organizationId: string, options?: { role?: UserRole; userId?: string }) {
+export function useLeads(
+  organizationId: string,
+  options?: { role?: UserRole; userId?: string; skip?: boolean; listen?: boolean }
+) {
   const constraints = useMemo(() => buildLeadsQuery({ organizationId }), [organizationId]);
-  const { data, loading, error, refetch } = useFirestoreCollection<Lead>('leads', constraints, { listen: true });
+  const listen = options?.listen ?? true;
+  const skip = Boolean(options?.skip || !organizationId);
+  const { data, loading, error, refetch } = useFirestoreCollection<Lead>('leads', constraints, {
+    listen,
+    skip,
+  });
   const assignmentConstraints = useMemo(
     () =>
       options?.role === 'member' && options?.userId && organizationId
@@ -24,23 +32,23 @@ export function useLeads(organizationId: string, options?: { role?: UserRole; us
         : [],
     [organizationId, options?.role, options?.userId]
   );
-  const shouldListenAssignments = Boolean(options?.role === 'member' && options?.userId && organizationId);
-  const shouldListenTasks = Boolean(options?.role === 'member' && options?.userId && organizationId);
+  const shouldFetchAssignments = Boolean(!skip && options?.role === 'member' && options?.userId && organizationId);
+  const shouldFetchTasks = Boolean(!skip && options?.role === 'member' && options?.userId && organizationId);
   const {
     data: assignments,
     loading: assignmentsLoading,
     error: assignmentsError,
   } = useFirestoreCollection<LeadAssignment>('leadAssignments', assignmentConstraints, {
-    listen: shouldListenAssignments,
-    skip: !shouldListenAssignments,
+    listen: listen && shouldFetchAssignments,
+    skip: !shouldFetchAssignments,
   });
   const {
     data: assignedTasks,
     loading: tasksLoading,
     error: tasksError,
   } = useFirestoreCollection<Task>('tasks', taskConstraints, {
-    listen: shouldListenTasks,
-    skip: !shouldListenTasks,
+    listen: listen && shouldFetchTasks,
+    skip: !shouldFetchTasks,
   });
 
   const leads = useMemo(() => {
@@ -174,17 +182,20 @@ export function useLeadActivities(leadId: string | undefined, organizationId?: s
   return { activities: data, loading, error, refetch };
 }
 
-export function useFolders(organizationId: string) {
+export function useFolders(organizationId: string, options?: { skip?: boolean; listen?: boolean }) {
   const { user, loading: authLoading } = useAuth();
+  const listen = options?.listen ?? true;
+  const skip = Boolean(options?.skip);
 
   const constraints = useMemo(
     () => (organizationId ? [where('organizationId', '==', organizationId)] : []),
     [organizationId]
   );
 
-  const shouldListen = Boolean(user && organizationId && !authLoading);
+  const shouldListen = Boolean(user && organizationId && !authLoading && !skip);
   const { data, loading, error, refetch } = useFirestoreCollection<Folder>('folders', constraints, {
-    listen: shouldListen,
+    listen,
+    skip: !shouldListen,
   });
 
   if (!shouldListen) {

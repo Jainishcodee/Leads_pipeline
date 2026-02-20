@@ -4,6 +4,7 @@ import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { CreateLeadModal } from '@/components/leads/CreateLeadModal';
 import { AddTeamMemberModal } from '@/components/admin/AddTeamMemberModal';
+import { BroadcastMessages } from '@/components/admin/BroadcastMessages';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useUsers } from '@/hooks/useFirebaseData';
 import { useAuth } from '@/auth/AuthContext';
@@ -16,6 +17,7 @@ export function AdminLayout() {
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [createLeadOpen, setCreateLeadOpen] = useState(false);
+  const [broadcastOpen, setBroadcastOpen] = useState(false);
   const [addTeamMemberOpen, setAddTeamMemberOpen] = useState(false);
   const isMobile = useIsMobile();
   const { profile } = useAuth();
@@ -24,19 +26,26 @@ export function AdminLayout() {
   const location = useLocation();
 
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-background">
+    <div className="flex h-full w-full overflow-hidden bg-background">
       {/* Desktop Sidebar - hover to expand */}
       {!isMobile && (
         <Sidebar 
           isExpanded={sidebarExpanded}
           onExpandedChange={setSidebarExpanded}
+          onOpenBroadcast={() => setBroadcastOpen(true)}
+          isBroadcastOpen={broadcastOpen}
         />
       )}
 
       {/* Mobile Sidebar - Sheet */}
       <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
         <SheetContent side="left" className="p-0 w-64">
-          <Sidebar isExpanded={true} onExpandedChange={() => {}} />
+          <Sidebar
+            isMobile
+            onExpandedChange={() => setMobileMenuOpen(false)}
+            onOpenBroadcast={() => setBroadcastOpen(true)}
+            isBroadcastOpen={broadcastOpen}
+          />
         </SheetContent>
       </Sheet>
 
@@ -67,6 +76,14 @@ export function AdminLayout() {
         organizationId={organizationId}
         onSuccess={() => refetchUsers()}
       />
+
+      {/* Broadcast Messages Panel */}
+      {broadcastOpen && organizationId && (
+        <BroadcastMessages
+          organizationId={organizationId}
+          onClose={() => setBroadcastOpen(false)}
+        />
+      )}
     </div>
   );
 }

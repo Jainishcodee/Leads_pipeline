@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { 
   LayoutDashboard, 
@@ -17,7 +17,6 @@ import { useAuth } from '@/auth/AuthContext';
 import { useFolders, useLeads } from '@/hooks/useFirebaseData';
 import { useFirestoreDoc } from '@/lib/useFirestore';
 import { CreateFolderModal } from '@/components/folders/CreateFolderModal';
-import { BroadcastMessages } from '@/components/admin/BroadcastMessages';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -45,24 +44,46 @@ interface SidebarProps {
   isExpanded?: boolean;
   onExpandedChange?: (expanded: boolean) => void;
   isMobile?: boolean;
+  onOpenBroadcast?: () => void;
+  isBroadcastOpen?: boolean;
 }
 
-export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false }: SidebarProps) {
+export function Sidebar({
+  isExpanded = false,
+  onExpandedChange,
+  isMobile = false,
+  onOpenBroadcast,
+  isBroadcastOpen = false,
+}: SidebarProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const [foldersOpen, setFoldersOpen] = useState(true);
   const [createFolderOpen, setCreateFolderOpen] = useState(false);
   const [broadcastOpen, setBroadcastOpen] = useState(false);
   const [signOutDialogOpen, setSignOutDialogOpen] = useState(false);
+  const [deferRealtime, setDeferRealtime] = useState(true);
   const { user, profile, signOut } = useAuth();
   const organizationId = profile?.organizationId || '';
-  const { folders, loading: foldersLoading, refetch: refetchFolders } = useFolders(organizationId);
-  const { leads } = useLeads(organizationId, { role: profile?.role, userId: user?.uid });
+  const { folders, loading: foldersLoading, refetch: refetchFolders } = useFolders(organizationId, {
+    skip: deferRealtime,
+    listen: !deferRealtime,
+  });
+  const { leads } = useLeads(organizationId, {
+    role: profile?.role,
+    userId: user?.uid,
+    skip: deferRealtime,
+    listen: !deferRealtime,
+  });
   const { data: organization } = useFirestoreDoc<{ id: string; name?: string }>(
     'organizations',
     organizationId || null,
     { listen: true }
   );
+
+  useEffect(() => {
+    const timerId = window.setTimeout(() => setDeferRealtime(false), 500);
+    return () => window.clearTimeout(timerId);
+  }, []);
 
   // Calculate actual lead counts per folder
   const folderLeadCounts = folders.reduce((acc, folder) => {
@@ -74,6 +95,12 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
   const isActive = (path: string) => location.pathname === path;
   const isFolderActive = (folderId: string) => 
     location.pathname === `${basePath}/folders/${folderId}`;
+
+  const closeMobileSidebar = () => {
+    if (isMobile) {
+      onExpandedChange?.(false);
+    }
+  };
 
   const displayName = profile?.name || user?.displayName || user?.email?.split('@')[0] || 'User';
   const displayMeta = profile?.email || user?.email || '';
@@ -126,6 +153,7 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
             <TooltipTrigger asChild>
               <NavLink
                 to={dashboardPath}
+                onClick={closeMobileSidebar}
                 className={cn(
                   'sidebar-item',
                   isActive(dashboardPath) && 'sidebar-item-active',
@@ -167,6 +195,7 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
                     <NavLink
                       key={folder.id}
                       to={`${basePath}/folders/${folder.id}`}
+                      onClick={closeMobileSidebar}
                       className={cn(
                         'sidebar-item text-sm py-2',
                         isFolderActive(folder.id) && 'sidebar-item-active'
@@ -205,6 +234,7 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
             <TooltipTrigger asChild>
               <NavLink
                 to={teamPath}
+                onClick={closeMobileSidebar}
                 className={cn(
                   'sidebar-item',
                   isActive(teamPath) && 'sidebar-item-active',
@@ -224,10 +254,17 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
           <Tooltip>
             <TooltipTrigger asChild>
               <button
-                onClick={() => setBroadcastOpen(true)}
+                onClick={() => {
+                  if (onOpenBroadcast) {
+                    onOpenBroadcast();
+                    closeMobileSidebar();
+                  } else {
+                    setBroadcastOpen(true);
+                  }
+                }}
                 className={cn(
                   'sidebar-item w-full',
-                  broadcastOpen && 'sidebar-item-active',
+                  (isBroadcastOpen || broadcastOpen) && 'sidebar-item-active',
                   !expanded && 'justify-center px-2'
                 )}
               >
@@ -246,6 +283,7 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
               <TooltipTrigger asChild>
                 <NavLink
                   to={settingsPath}
+                  onClick={closeMobileSidebar}
                   className={cn(
                     'sidebar-item',
                     isActive(settingsPath) && 'sidebar-item-active',
@@ -268,7 +306,10 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
           <Tooltip>
             <TooltipTrigger asChild>
               <div 
-                onClick={() => navigate(`${basePath}/profile`)}
+                onClick={() => {
+                  navigate(`${basePath}/profile`);
+                  closeMobileSidebar();
+                }}
                 className={cn(
                   'flex items-center gap-3 p-2 rounded-xl hover:bg-sidebar-accent transition-colors cursor-pointer',
                   !expanded && 'justify-center'
@@ -317,14 +358,6 @@ export function Sidebar({ isExpanded = false, onExpandedChange, isMobile = false
         onSuccess={() => refetchFolders()}
         existingFolders={folders}
       />
-      
-      {/* Broadcast Messages Panel */}
-      {broadcastOpen && organizationId && (
-        <BroadcastMessages 
-          organizationId={organizationId}
-          onClose={() => setBroadcastOpen(false)}
-        />
-      )}
       
       {/* Sign Out Confirmation Dialog */}
       <AlertDialog open={signOutDialogOpen} onOpenChange={setSignOutDialogOpen}>

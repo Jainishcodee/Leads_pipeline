@@ -17,6 +17,8 @@ export async function initializeCapacitor() {
   }
 
   try {
+    applyNativeAppInsets();
+
     // Initialize Status Bar
     await initializeStatusBar();
 
@@ -33,6 +35,21 @@ export async function initializeCapacitor() {
   } catch (error) {
     console.error("Error initializing Capacitor plugins:", error);
   }
+}
+
+function applyNativeAppInsets() {
+  const root = document.documentElement;
+  const body = document.body;
+
+  root.classList.add('native-app');
+  body.classList.add('native-app');
+
+  const isAndroid = Capacitor.getPlatform() === 'android';
+  const topFallback = isAndroid ? 28 : 0;
+  const bottomFallback = isAndroid ? 16 : 0;
+
+  root.style.setProperty('--app-safe-top', `max(env(safe-area-inset-top, 0px), ${topFallback}px)`);
+  root.style.setProperty('--app-safe-bottom', `max(env(safe-area-inset-bottom, 0px), ${bottomFallback}px)`);
 }
 
 /**
@@ -91,6 +108,13 @@ async function initializePushNotifications() {
     // Check if on native platform first
     if (!Capacitor.isNativePlatform()) {
       console.log("ⓘ Push Notifications skipped - not on native platform");
+      return;
+    }
+
+    // Avoid crashing if Firebase is not configured in the native app
+    const pushEnabled = import.meta.env.VITE_ENABLE_PUSH_NOTIFICATIONS === "true";
+    if (!pushEnabled) {
+      console.log("ⓘ Push Notifications disabled (VITE_ENABLE_PUSH_NOTIFICATIONS)");
       return;
     }
 

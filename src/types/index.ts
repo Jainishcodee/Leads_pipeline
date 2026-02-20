@@ -159,11 +159,19 @@ export interface ChatMessage {
   senderAvatar?: string;
   senderRole?: UserRole; // Role of the sender
   message: string;
-  messageType?: 'text' | 'voice' | 'image'; // Type of message
+  messageType?: 'text' | 'voice' | 'image' | 'video'; // Type of message
   voiceUrl?: string; // URL to voice recording in Firebase Storage
   voiceDuration?: number; // Duration in seconds
   imageUrl?: string; // URL to image in Firebase Storage
   imageName?: string; // Original image file name
+  videoUrl?: string; // URL to video
+  videoName?: string; // Original video file name
+  replyToMessageId?: string;
+  replyToMessagePreview?: string;
+  isPinned?: boolean;
+  pinnedById?: string;
+  pinnedByName?: string;
+  pinnedAt?: Date;
   mentions?: string[]; // user IDs
   attachments?: Attachment[];
   isSystemMessage?: boolean;
