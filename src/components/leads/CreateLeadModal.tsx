@@ -25,6 +25,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import type { TaskStatus, LeadPriority, Lead } from '@/types';
 import { leadsAPI, tasksAPI, assignmentsAPI, activitiesAPI, foldersAPI, notificationsAPI } from '@/lib/api';
+import { isValidEmail } from '@/lib/validation';
 import { useAuth } from '@/auth/AuthContext';
 import { useFolders } from '@/hooks/useFirebaseData';
 import { useUsers } from '@/hooks/useFirebaseData';
@@ -357,6 +358,20 @@ export function CreateLeadModal({ open, onOpenChange, defaultFolderId, editingLe
 
     if (!formData.companyName || !formData.folderId) {
       toast.error('Please fill in all required fields');
+      return;
+    }
+
+    // Validate email formats (company email + any contact emails that were filled in)
+    if (formData.emailId.trim() && !isValidEmail(formData.emailId)) {
+      toast.error('Please enter a valid company email address');
+      return;
+    }
+
+    const invalidContact = contactPersons.find(
+      (contact) => contact.email.trim() && !isValidEmail(contact.email)
+    );
+    if (invalidContact) {
+      toast.error(`Please enter a valid email for ${invalidContact.name || 'the contact person'}`);
       return;
     }
 

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '@/auth/AuthContext';
 import { invitesAPI, notificationsAPI, usersAPI } from '@/lib/api';
 import { getDocument } from '@/lib/firestore';
+import { getEmailError } from '@/lib/validation';
 import { toast } from 'sonner';
 import {
   Dialog,
@@ -161,20 +162,14 @@ export function AddTeamMemberModal({
   };
 
   const handleInviteUser = async () => {
-    if (!inviteEmail.trim()) {
-      toast.error('Please enter an email address');
+    const emailError = getEmailError(inviteEmail);
+    if (emailError) {
+      toast.error(emailError);
       return;
     }
 
     if (!organizationId || !authUser) {
       toast.error('Missing organization or user context');
-      return;
-    }
-
-    // Basic email validation
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(inviteEmail)) {
-      toast.error('Please enter a valid email address');
       return;
     }
 
