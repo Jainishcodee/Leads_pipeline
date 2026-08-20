@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { 
   Building2, 
   Users, 
@@ -14,14 +14,36 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Switch } from '@/components/ui/switch';
-import { mockOrganization } from '@/data/mockData';
 import { toast } from 'sonner';
+import { useAuth } from '@/auth/AuthContext';
+import { useFirestoreDoc } from '@/lib/useFirestore';
+import { updateDocument } from '@/lib/firestore';
+import type { Organization } from '@/types';
 
 export default function Settings() {
-  const [orgName, setOrgName] = useState(mockOrganization.name);
+  const { profile } = useAuth();
+  const organizationId = profile?.organizationId || null;
+  const { data: organization } = useFirestoreDoc<Organization>('organizations', organizationId, { listen: true });
+  const [orgName, setOrgName] = useState('');
+
+  useEffect(() => {
+    if (organization?.name) {
+      setOrgName(organization.name);
+    }
+  }, [organization?.name]);
 
   const handleSave = () => {
-    toast.success('Settings saved successfully');
+    if (!organizationId) {
+      toast.error('No organization linked');
+      return;
+    }
+    if (!orgName.trim()) {
+      toast.error('Organization name is required');
+      return;
+    }
+    updateDocument('organizations', organizationId, { name: orgName.trim() })
+      .then(() => toast.success('Settings saved successfully'))
+      .catch(() => toast.error('Failed to save settings'));
   };
 
   return (
@@ -44,10 +66,7 @@ export default function Settings() {
             <Users className="w-4 h-4" />
             Users & Roles
           </TabsTrigger>
-          <TabsTrigger value="folders" className="gap-1.5">
-            <FolderOpen className="w-4 h-4" />
-            Folder Settings
-          </TabsTrigger>
+          
           <TabsTrigger value="templates" className="gap-1.5">
             <FileText className="w-4 h-4" />
             Templates
@@ -100,7 +119,7 @@ export default function Settings() {
                   <p className="font-medium">Admin</p>
                   <p className="text-sm text-muted-foreground">Full access to all features</p>
                 </div>
-                <Badge variant="outline">Full Access</Badge>
+                  <Badge variant="outline">Full Access</Badge>
               </div>
               <div className="flex items-center justify-between p-4 bg-muted/50 rounded-xl">
                 <div>

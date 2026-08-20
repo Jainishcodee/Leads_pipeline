@@ -151,6 +151,32 @@
     font-family: 'Inter', system-ui, sans-serif;
   }
 
+  html.native-app,
+  body.native-app {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  .native-app #root {
+    height: 100%;
+    box-sizing: border-box;
+    padding-top: var(--app-safe-top, env(safe-area-inset-top, 0px));
+    padding-bottom: var(--app-safe-bottom, env(safe-area-inset-bottom, 0px));
+  }
+
+  .native-app,
+  .native-app * {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .native-app::-webkit-scrollbar,
+  .native-app *::-webkit-scrollbar {
+    width: 0 !important;
+    height: 0 !important;
+    display: none;
+  }
+
   /* Custom scrollbar for premium feel */
   ::-webkit-scrollbar {
     width: 8px;
@@ -387,5 +413,19 @@
 
   .safe-area-inset-bottom {
     padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+}
+
+/* Prevent mobile zoom on inputs */
+@media screen and (max-width: 768px) {
+  input[type="text"],
+  input[type="email"],
+  input[type="tel"],
+  input[type="number"],
+  input[type="password"],
+  input[type="search"],
+  select,
+  textarea {
+    font-size: 16px !important;
   }
 }

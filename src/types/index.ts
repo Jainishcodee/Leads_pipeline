@@ -1,6 +1,6 @@
 // Mocha Leads - Core Types
 
-export type UserRole = 'admin' | 'member' | 'observer';
+export type UserRole = 'superadmin' | 'admin' | 'member' | 'observer';
 
 export type LeadStatus = 
   | 'new' 
@@ -15,6 +15,7 @@ export type LeadStatus =
 export type LeadPriority = 'low' | 'medium' | 'high';
 
 export type TaskStatus = 'todo' | 'in_progress' | 'done';
+export type TaskReviewStatus = 'pending' | 'approved' | 'changes_requested';
 
 export interface Organization {
   id: string;
@@ -27,9 +28,16 @@ export interface User {
   id: string;
   email: string;
   name: string;
+  firstName?: string;
+  lastName?: string;
+  bio?: string;
   avatar?: string;
   role: UserRole;
-  organizationId: string;
+  organizationId: string | null;
+  phone?: string;
+  invitationStatus?: 'pending' | 'accepted' | 'rejected';
+  invitedById?: string;
+  invitedByEmail?: string;
   createdAt: Date;
 }
 
@@ -46,6 +54,15 @@ export interface Folder {
   createdAt: Date;
 }
 
+export interface ContactPerson {
+  id: string;
+  name: string;
+  phone: string;
+  email: string;
+  whatsapp: string;
+  role?: string;
+}
+
 export interface Lead {
   id: string;
   // Required fields
@@ -56,6 +73,11 @@ export interface Lead {
   interest: string[];
   reference?: string;
   completeAddress: string;
+  
+  // Contact persons (new field)
+  contactPersons?: ContactPerson[];
+  
+  // Legacy fields (kept for backward compatibility)
   managerName: string;
   managerPhone: string;
   managerEmail: string;
@@ -94,6 +116,7 @@ export interface Lead {
 export interface LeadAssignment {
   id: string;
   leadId: string;
+  organizationId: string;
   userId: string;
   userName?: string;
   userAvatar?: string;
@@ -104,14 +127,19 @@ export interface LeadAssignment {
 export interface Task {
   id: string;
   leadId: string;
+  organizationId: string;
   assignedToId: string;
   assignedToName?: string;
+  createdById?: string;
+  createdByName?: string;
   title: string;
   description?: string;
   dueDate?: Date;
   status: TaskStatus;
   priority: LeadPriority;
   checklist?: TaskChecklistItem[];
+  reviewStatus?: TaskReviewStatus;
+  reviewNote?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -125,13 +153,30 @@ export interface TaskChecklistItem {
 export interface ChatMessage {
   id: string;
   leadId: string;
+  organizationId: string;
   senderId: string;
   senderName: string;
   senderAvatar?: string;
+  senderRole?: UserRole; // Role of the sender
   message: string;
+  messageType?: 'text' | 'voice' | 'image' | 'video'; // Type of message
+  voiceUrl?: string; // URL to voice recording in Firebase Storage
+  voiceDuration?: number; // Duration in seconds
+  imageUrl?: string; // URL to image in Firebase Storage
+  imageName?: string; // Original image file name
+  videoUrl?: string; // URL to video
+  videoName?: string; // Original video file name
+  replyToMessageId?: string;
+  replyToMessagePreview?: string;
+  isPinned?: boolean;
+  pinnedById?: string;
+  pinnedByName?: string;
+  pinnedAt?: Date;
   mentions?: string[]; // user IDs
   attachments?: Attachment[];
   isSystemMessage?: boolean;
+  read?: boolean;
+  readBy?: string[]; // user IDs who have read the message
   createdAt: Date;
   editedAt?: Date;
 }
@@ -147,6 +192,7 @@ export interface Attachment {
 export interface ActivityLog {
   id: string;
   leadId: string;
+  organizationId: string;
   actorId: string;
   actorName: string;
   actionType: string;
@@ -159,11 +205,37 @@ export interface ActivityLog {
 export interface Notification {
   id: string;
   userId: string;
-  type: 'assignment' | 'task' | 'mention' | 'status_change' | 'due_soon';
+  organizationId: string;
+  type: 'assignment' | 'task' | 'mention' | 'status_change' | 'due_soon' | 'invite' | 'invite_accept' | 'invite_reject' | 'chat' | 'lead' | 'activity' | 'broadcast';
   title: string;
   message: string;
   leadId?: string;
   read: boolean;
+  createdAt: Date;
+}
+
+export interface OrganizationInvite {
+  id: string;
+  email: string;
+  organizationId: string;
+  organizationName?: string;
+  invitedById: string;
+  invitedByEmail?: string;
+  status: 'pending' | 'accepted' | 'rejected' | 'expired';
+  createdAt: Date;
+  respondedAt?: Date;
+}
+
+export interface LeadAttachment {
+  id: string;
+  leadId: string;
+  organizationId: string;
+  fileName: string;
+  fileUrl: string;
+  fileType: string;
+  fileSize: number;
+  uploadedById: string;
+  uploadedByName: string;
   createdAt: Date;
 }
 

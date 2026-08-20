@@ -4,8 +4,6 @@ import {
   Plus, 
   Filter, 
   Download, 
-  LayoutGrid, 
-  List,
   Calendar,
   MapPin,
   MoreHorizontal
@@ -25,23 +23,147 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { LeadsTable } from '@/components/leads/LeadsTable';
 import { CreateLeadModal } from '@/components/leads/CreateLeadModal';
-import { mockFolders, mockLeads } from '@/data/mockData';
+import { EditFolderModal } from '@/components/folders/EditFolderModal';
+import { useFolderLeads, useFolders } from '@/hooks/useFirebaseData';
 import { format } from 'date-fns';
-import { cn } from '@/lib/utils';
+import { timestampToDate } from '@/lib/firestore';
+import { useAuth } from '@/auth/AuthContext';
+import { toast } from 'sonner';
+import { foldersAPI, leadsAPI } from '@/lib/api';
+import type { Lead } from '@/types';
 
 export default function FolderView() {
   const { folderId } = useParams();
   const navigate = useNavigate();
-  const [viewMode, setViewMode] = useState<'table' | 'kanban'>('table');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
   const [createLeadOpen, setCreateLeadOpen] = useState(false);
+  const [editFolderOpen, setEditFolderOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
-  const folder = mockFolders.find(f => f.id === folderId);
-  const folderLeads = mockLeads.filter(l => l.folderId === folderId);
+  const { profile, user } = useAuth();
+  const organizationId = profile?.organizationId || '';
+  const { folders, loading: foldersLoading } = useFolders(organizationId);
+  const { leads: folderLeads, loading: leadsLoading } = useFolderLeads(folderId || '', organizationId, {
+    role: profile?.role,
+    userId: user?.uid,
+  });
+  
+  const folder = folders.find(f => f.id === folderId);
+  const isAdmin = profile?.role === 'admin' || profile?.role === 'superadmin';
 
+  const handleDeleteFolder = async () => {
+    if (!folder || !folderId) return;
+    
+    try {
+      setIsDeleting(true);
+      
+      // First, delete all leads in the folder
+      const leadsInFolder = await  leadsAPI.getByFolder(folderId, organizationId);
+      await Promise.all(
+        leadsInFolder.map(lead => leadsAPI.delete(lead.id))
+      );
+      
+      // Then delete the folder
+      await foldersAPI.delete(folderId);
+      toast.success('Folder and all its leads deleted successfully');
+      setDeleteDialogOpen(false);
+      navigate('/dashboard');
+    } catch (error) {
+      console.error('Error deleting folder:', error);
+      toast.error('Failed to delete folder');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+  
+  const exportToCSV = () => {
+    try {
+      // Prepare CSV headers
+      const headers = [
+        'Company Name',
+        'Location',
+        'Status',
+        'Priority',
+        'WhatsApp Number',
+        'Email',
+        'Manager Name',
+        'Manager Phone',
+        'Interests',
+        'Complete Address',
+        'Reference',
+        'Created By',
+        'Created At',
+      ];
+
+      // Prepare CSV rows
+      const rows = filteredLeads.map(lead => [
+        lead.companyName || '',
+        lead.location || '',
+        lead.status || '',
+        lead.priority || '',
+        lead.whatsappNumber || '',
+        lead.emailId || '',
+        lead.managerName || '',
+        lead.managerPhone || '',
+        Array.isArray(lead.interest) ? lead.interest.join('; ') : (lead.interest || ''),
+        lead.completeAddress || '',
+        lead.reference || '',
+        lead.createdByName || '',
+        lead.createdAt ? format(timestampToDate(lead.createdAt), 'yyyy-MM-dd HH:mm:ss') : '',
+      ]);
+
+      // Combine headers and rows
+      const csvContent = [
+        headers.join(','),
+        ...rows.map(row => 
+          row.map(cell => 
+            // Escape commas and quotes in cell content
+            `"${String(cell).replace(/"/g, '""')}"`
+          ).join(',')
+        )
+      ].join('\n');
+
+      // Create blob and download
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      
+      link.setAttribute('href', url);
+      link.setAttribute('download', `${folder?.name || 'leads'}_export_${format(new Date(), 'yyyy-MM-dd')}.csv`);
+      link.style.visibility = 'hidden';
+      
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      toast.success(`Exported ${filteredLeads.length} leads to CSV`);
+    } catch (error) {
+      console.error('Error exporting to CSV:', error);
+      toast.error('Failed to export to CSV');
+    }
+  };
+  
+  if (foldersLoading || leadsLoading) {
+    return (
+      <div className="p-8 flex items-center justify-center">
+        <p className="text-muted-foreground">Loading folder...</p>
+      </div>
+    );
+  }
+  
   // Apply filters
   const filteredLeads = folderLeads.filter(lead => {
     if (statusFilter !== 'all' && lead.status !== statusFilter) return false;
@@ -77,7 +199,11 @@ export default function FolderView() {
             <div className="flex items-center gap-4 mt-2 text-sm text-muted-foreground">
               <span className="flex items-center gap-1.5">
                 <Calendar className="w-4 h-4" />
-                {format(folder.eventStartDate, 'MMM d')} - {format(folder.eventEndDate!, 'MMM d, yyyy')}
+                {format(timestampToDate(folder.eventStartDate), 'MMM d')}
+                {' - '}
+                {folder.eventEndDate
+                  ? format(timestampToDate(folder.eventEndDate), 'MMM d, yyyy')
+                  : '—'}
               </span>
               {folder.venue && (
                 <span className="flex items-center gap-1.5">
@@ -97,21 +223,30 @@ export default function FolderView() {
             <Plus className="w-4 h-4" />
             <span>Add Lead</span>
           </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="icon">
-                <MoreHorizontal className="w-4 h-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem>
-                <Download className="w-4 h-4 mr-2" />
-                Export to CSV
-              </DropdownMenuItem>
-              <DropdownMenuItem>Edit Folder</DropdownMenuItem>
-              <DropdownMenuItem className="text-destructive">Delete Folder</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {isAdmin && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="icon">
+                  <MoreHorizontal className="w-4 h-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={exportToCSV}>
+                  <Download className="w-4 h-4 mr-2" />
+                  Export to CSV
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setEditFolderOpen(true)}>
+                  Edit Folder
+                </DropdownMenuItem>
+                <DropdownMenuItem 
+                  className="text-destructive"
+                  onClick={() => setDeleteDialogOpen(true)}
+                >
+                  Delete Folder
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
       </div>
 
@@ -145,7 +280,7 @@ export default function FolderView() {
               <SelectValue placeholder="Status" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Statuses</SelectItem>
+              <SelectItem value="all">All</SelectItem>
               <SelectItem value="new">New</SelectItem>
               <SelectItem value="contacted">Contacted</SelectItem>
               <SelectItem value="qualified">Qualified</SelectItem>
@@ -169,49 +304,47 @@ export default function FolderView() {
             </SelectContent>
           </Select>
         </div>
-
-        <div className="flex items-center gap-1 bg-muted rounded-lg p-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            className={cn(
-              'rounded-md',
-              viewMode === 'table' && 'bg-background shadow-sm'
-            )}
-            onClick={() => setViewMode('table')}
-          >
-            <List className="w-4 h-4 mr-1.5" />
-            Table
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className={cn(
-              'rounded-md',
-              viewMode === 'kanban' && 'bg-background shadow-sm'
-            )}
-            onClick={() => setViewMode('kanban')}
-          >
-            <LayoutGrid className="w-4 h-4 mr-1.5" />
-            Kanban
-          </Button>
-        </div>
       </div>
 
       {/* Leads View */}
-      {viewMode === 'table' ? (
-        <LeadsTable leads={filteredLeads} />
-      ) : (
-        <div className="text-center py-12 card-premium">
-          <p className="text-muted-foreground">Kanban view coming soon</p>
-        </div>
-      )}
+      <LeadsTable leads={filteredLeads} />
 
       <CreateLeadModal 
         open={createLeadOpen} 
         onOpenChange={setCreateLeadOpen}
         defaultFolderId={folderId}
       />
+
+      {folder && (
+        <EditFolderModal
+          open={editFolderOpen}
+          onOpenChange={setEditFolderOpen}
+          folder={folder}
+          existingFolders={folders}
+          onSuccess={() => {
+            // Folder list will automatically refresh due to useEffect in useFolders
+          }}
+        />
+      )}
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Folder</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this folder? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction 
+            onClick={handleDeleteFolder}
+            disabled={isDeleting}
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          >
+            {isDeleting ? 'Deleting...' : 'Delete'}
+          </AlertDialogAction>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -1,0 +1,182 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function getUserData(userId) {
+      return get(/databases/$(database)/documents/users/$(userId)).data;
+    }
+    
+    function currentUserData() {
+      return isAuthenticated() ? getUserData(request.auth.uid) : null;
+    }
+    
+    function userRole() {
+      return isAuthenticated() && currentUserData() != null ? currentUserData().get('role', 'member') : null;
+    }
+
+    function userOrgId() {
+      return isAuthenticated() && currentUserData() != null ? currentUserData().get('organizationId', null) : null;
+    }
+
+    function isSuperAdmin() {
+      return userRole() == 'superadmin';
+    }
+
+    function isOrgMember(orgId) {
+      return isAuthenticated() && userOrgId() == orgId;
+    }
+
+    function isOrgAdmin(orgId) {
+      return isAuthenticated() && userRole() == 'admin' && userOrgId() == orgId;
+    }
+
+    function orgScopedAccess(orgId) {
+      return isSuperAdmin() || isOrgMember(orgId);
+    }
+
+    function userInOrg(userId, orgId) {
+      return getUserData(userId).get('organizationId', null) == orgId;
+    }
+
+    function leadInOrg(leadId, orgId) {
+      return get(/databases/$(database)/documents/leads/$(leadId)).data.get('organizationId', null) == orgId;
+    }
+    
+    // Organizations
+    match /organizations/{orgId} {
+      allow read: if isAuthenticated() && (isSuperAdmin() || isOrgMember(orgId));
+      allow write: if isSuperAdmin();
+      allow update: if isSuperAdmin() || isOrgAdmin(orgId);
+    }
+    
+    // Users - Allow users to read their own document and other users in their org
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (
+        request.auth.uid == userId
+        || (isOrgMember(resource.data.get('organizationId', null)))
+        || isSuperAdmin()
+      );
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      allow update: if isAuthenticated() && (
+        request.auth.uid == userId
+        || isSuperAdmin()
+        || (isOrgAdmin(userOrgId()) && userOrgId() == resource.data.get('organizationId', null))
+      );
+    }
+
+    // Folders
+    match /folders/{folderId} {
+      allow read: if isAuthenticated() && orgScopedAccess(resource.data.get('organizationId', null));
+      allow create: if isAuthenticated() && (isSuperAdmin() || isOrgAdmin(request.resource.data.get('organizationId', null)));
+      allow update, delete: if isAuthenticated() && (isSuperAdmin() || isOrgAdmin(resource.data.get('organizationId', null)));
+    }
+    
+    // Leads
+    match /leads/{leadId} {
+      allow read: if isAuthenticated() && orgScopedAccess(resource.data.get('organizationId', null));
+      allow create: if isAuthenticated() && (isSuperAdmin() || isOrgMember(request.resource.data.get('organizationId', null)));
+      allow update, delete: if isAuthenticated() && (isSuperAdmin() || isOrgMember(resource.data.get('organizationId', null)));
+    }
+    
+    // Lead Assignments
+    match /leadAssignments/{assignmentId} {
+      allow read: if isAuthenticated() && (isSuperAdmin() || orgScopedAccess(resource.data.get('organizationId', null)));
+      allow create: if isAuthenticated() 
+        && (isSuperAdmin() || orgScopedAccess(request.resource.data.get('organizationId', null)))
+        && userInOrg(request.resource.data.userId, request.resource.data.get('organizationId', null))
+        && leadInOrg(request.resource.data.leadId, request.resource.data.get('organizationId', null));
+      allow update, delete: if isAuthenticated() && (isSuperAdmin() || orgScopedAccess(resource.data.get('organizationId', null)));
+    }
+    
+    // Tasks
+    match /tasks/{taskId} {
+      allow read: if isAuthenticated() && (isSuperAdmin() || orgScopedAccess(resource.data.get('organizationId', null)));
+      allow create: if isAuthenticated() 
+        && (isSuperAdmin() || orgScopedAccess(request.resource.data.get('organizationId', null)))
+        && request.resource.data.createdById == request.auth.uid
+        && userInOrg(request.resource.data.assignedToId, request.resource.data.get('organizationId', null))
+        && leadInOrg(request.resource.data.leadId, request.resource.data.get('organizationId', null));
+      allow update: if isAuthenticated()
+        && (isSuperAdmin()
+          || isOrgAdmin(resource.data.get('organizationId', null))
+          || request.auth.uid == resource.data.assignedToId
+          || request.auth.uid == resource.data.createdById);
+      allow delete: if isAuthenticated()
+        && (isSuperAdmin()
+          || isOrgAdmin(resource.data.get('organizationId', null))
+          || request.auth.uid == resource.data.createdById);
+    }
+    
+    // Activities
+    match /activities/{activityId} {
+      allow read: if isAuthenticated() && (isSuperAdmin() || orgScopedAccess(resource.data.get('organizationId', null)));
+      allow create: if isAuthenticated() && (isSuperAdmin() || orgScopedAccess(request.resource.data.get('organizationId', null)));
+      allow update, delete: if isAuthenticated() && (isSuperAdmin() || orgScopedAccess(resource.data.get('organizationId', null)));
+    }
+    
+    // Chat Messages
+    match /chatMessages/{messageId} {
+      allow read: if isAuthenticated()
+        && (isSuperAdmin()
+          || orgScopedAccess(resource.data.get('organizationId', null))
+          || (isAuthenticated() && !('organizationId' in resource.data)));
+
+      allow create: if isAuthenticated()
+        && (isSuperAdmin()
+          || orgScopedAccess(request.resource.data.get('organizationId', null))
+          || (isAuthenticated() && request.resource.data.get('organizationId', null) == null));
+
+      allow update, delete: if isAuthenticated() && (isSuperAdmin() || orgScopedAccess(resource.data.get('organizationId', null)));
+    }
+
+    // Broadcast Messages (Admin to all team members)
+    match /broadcastMessages/{messageId} {
+      allow read: if isAuthenticated() && (isSuperAdmin() || isOrgMember(resource.data.get('organizationId', null)));
+      allow create: if isAuthenticated() && (isSuperAdmin() || isOrgAdmin(request.resource.data.get('organizationId', null)));
+      allow update, delete: if isAuthenticated() && (isSuperAdmin() || (isOrgAdmin(resource.data.get('organizationId', null)) && resource.data.senderId == request.auth.uid));
+    }
+    
+    // Notifications
+    match /notifications/{notificationId} {
+      allow read: if isSuperAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+      allow create: if isAuthenticated()
+        && orgScopedAccess(request.resource.data.get('organizationId', null))
+        && userInOrg(request.resource.data.userId, request.resource.data.get('organizationId', null));
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+
+    // Organization Invites
+    match /invites/{inviteId} {
+      allow read: if isSuperAdmin()
+        || (isAuthenticated() && request.auth.token.email != null && resource.data.email == request.auth.token.email)
+        || (isAuthenticated() && resource.data.invitedById == request.auth.uid)
+        || (isAuthenticated() && resource.data.get('organizationId', null) == userOrgId());
+
+      allow create: if isSuperAdmin() || isOrgAdmin(request.resource.data.get('organizationId', null));
+
+      allow update: if isSuperAdmin()
+        || (isAuthenticated() && request.auth.token.email != null && resource.data.email == request.auth.token.email)
+        || (isAuthenticated() && resource.data.invitedById == request.auth.uid)
+        || (isAuthenticated() && resource.data.get('organizationId', null) == userOrgId());
+    }
+
+    // Lead Attachments
+    match /leadAttachments/{attachmentId} {
+      allow read: if isAuthenticated() && (isSuperAdmin() || orgScopedAccess(resource.data.get('organizationId', null)));
+      allow create: if isAuthenticated()
+        && (isSuperAdmin() 
+          || (orgScopedAccess(request.resource.data.get('organizationId', null))
+            && leadInOrg(request.resource.data.leadId, request.resource.data.get('organizationId', null))
+            && request.resource.data.uploadedById == request.auth.uid));
+      allow delete: if isAuthenticated()
+        && (isSuperAdmin() 
+          || isOrgAdmin(resource.data.get('organizationId', null))
+          || resource.data.uploadedById == request.auth.uid);
+    }
+
+  }
+}

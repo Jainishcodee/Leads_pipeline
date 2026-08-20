@@ -1,0 +1,19 @@
+# Kaggriculture local dev.
+#
+# Install in TWO steps -- see README.md:
+#   pip install -r requirements.txt
+#   pip install --no-deps kaggle-environments
+#
+# kaggle-environments declares jax / open_spiel / transformers / litellm for OTHER
+# environments. Installing them on Windows blows past MAX_PATH (WinError 206, orbax
+# nests ~180 chars deep) and the kaggriculture env imports none of them, so it goes in
+# with --no-deps. This file lists what kaggle_environments core + kaggriculture
+# actually need, with their own dependencies resolved normally.
+
+jsonschema>=3.0.1
+numpy>=2.0
+requests>=2.25.1
+pyjson5
+termcolor
+pydantic>=2.11.4
+Flask>=1.1.2

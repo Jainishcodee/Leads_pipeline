@@ -16,29 +16,86 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { StatusBadge } from './StatusBadge';
 import { PriorityBadge } from './PriorityBadge';
+import { CreateLeadModal } from './CreateLeadModal';
 import { cn } from '@/lib/utils';
+import { timestampToDate } from '@/lib/firestore';
+import { useAuth } from '@/auth/AuthContext';
+import { leadsAPI } from '@/lib/api';
+import { toast } from 'sonner';
 import type { Lead } from '@/types';
 import { format, formatDistanceToNow } from 'date-fns';
 
 interface LeadsTableProps {
   leads: Lead[];
   showFolder?: boolean;
+  totalLeads?: number; // For showing "+X more" indicator
+  emptyMessage?: string; // Custom message when no leads
 }
 
-export function LeadsTable({ leads, showFolder = false }: LeadsTableProps) {
+export function LeadsTable({ leads, showFolder = false, totalLeads, emptyMessage = 'No leads found' }: LeadsTableProps) {
   const navigate = useNavigate();
+  const { profile } = useAuth();
+  const basePath = profile?.role === 'admin' ? '/admin' : '/dashboard';
+  const isAdmin = profile?.role === 'admin' || profile?.role === 'superadmin';
+  
   const [sortField, setSortField] = useState<'lastActivityAt' | 'createdAt' | 'nextFollowUpDate'>('lastActivityAt');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [leadToDelete, setLeadToDelete] = useState<Lead | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [leadToEdit, setLeadToEdit] = useState<Lead | null>(null);
+
+  const handleDeleteLead = async () => {
+    if (!leadToDelete) return;
+    
+    try {
+      setIsDeleting(true);
+      await leadsAPI.delete(leadToDelete.id);
+      toast.success('Lead deleted successfully');
+      setDeleteDialogOpen(false);
+      setLeadToDelete(null);
+    } catch (error) {
+      console.error('Error deleting lead:', error);
+      toast.error('Failed to delete lead');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const openDeleteDialog = (lead: Lead, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setLeadToDelete(lead);
+    setDeleteDialogOpen(true);
+  };
+
+  const openEditModal = (lead: Lead, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setLeadToEdit(lead);
+    setEditModalOpen(true);
+  };
+
+  const toDate = (value: Lead[typeof sortField] | null | undefined) =>
+    value ? timestampToDate(value) : null;
 
   const sortedLeads = [...leads].sort((a, b) => {
-    const aVal = a[sortField];
-    const bVal = b[sortField];
+    const aVal = toDate(a[sortField]);
+    const bVal = toDate(b[sortField]);
     if (!aVal) return 1;
     if (!bVal) return -1;
-    const comparison = new Date(aVal).getTime() - new Date(bVal).getTime();
+    const comparison = aVal.getTime() - bVal.getTime();
     return sortOrder === 'desc' ? -comparison : comparison;
   });
 
@@ -55,7 +112,7 @@ export function LeadsTable({ leads, showFolder = false }: LeadsTableProps) {
   const MobileLeadCard = ({ lead }: { lead: Lead }) => (
     <div 
       className="card-premium p-4 cursor-pointer hover:bg-muted/30 transition-colors"
-      onClick={() => navigate(`/leads/${lead.id}`)}
+      onClick={() => navigate(`${basePath}/leads/${lead.id}`)}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3 min-w-0 flex-1">
@@ -88,10 +145,10 @@ export function LeadsTable({ leads, showFolder = false }: LeadsTableProps) {
           {lead.nextFollowUpDate && (
             <span className={cn(
               'flex items-center gap-1',
-              new Date(lead.nextFollowUpDate) < new Date() && 'text-destructive'
+              toDate(lead.nextFollowUpDate) && toDate(lead.nextFollowUpDate)! < new Date() && 'text-destructive'
             )}>
               <Calendar className="w-3 h-3" />
-              {format(new Date(lead.nextFollowUpDate), 'MMM d')}
+              {format(toDate(lead.nextFollowUpDate)!, 'MMM d')}
             </span>
           )}
         </div>
@@ -150,7 +207,7 @@ export function LeadsTable({ leads, showFolder = false }: LeadsTableProps) {
                 <tr 
                   key={lead.id} 
                   className="cursor-pointer"
-                  onClick={() => navigate(`/leads/${lead.id}`)}
+                  onClick={() => navigate(`${basePath}/leads/${lead.id}`)}
                 >
                   <td>
                     <div className="flex items-center gap-3">
@@ -196,9 +253,9 @@ export function LeadsTable({ leads, showFolder = false }: LeadsTableProps) {
                       <div className="flex items-center gap-1.5 text-sm">
                         <Calendar className="w-3.5 h-3.5 text-muted-foreground" />
                         <span className={cn(
-                          new Date(lead.nextFollowUpDate) < new Date() && 'text-destructive font-medium'
+                          toDate(lead.nextFollowUpDate) && toDate(lead.nextFollowUpDate)! < new Date() && 'text-destructive font-medium'
                         )}>
-                          {format(new Date(lead.nextFollowUpDate), 'MMM d')}
+                          {format(toDate(lead.nextFollowUpDate)!, 'MMM d')}
                         </span>
                       </div>
                     ) : (
@@ -207,38 +264,88 @@ export function LeadsTable({ leads, showFolder = false }: LeadsTableProps) {
                   </td>
                   <td>
                     <span className="text-sm text-muted-foreground">
-                      {formatDistanceToNow(new Date(lead.lastActivityAt), { addSuffix: true })}
+                      {lead.lastActivityAt
+                        ? formatDistanceToNow(timestampToDate(lead.lastActivityAt), { addSuffix: true })
+                        : '—'}
                     </span>
                   </td>
                   <td>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
-                        <Button variant="ghost" size="icon" className="h-8 w-8">
-                          <MoreHorizontal className="w-4 h-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => navigate(`/leads/${lead.id}`)}>
-                          View Details
-                        </DropdownMenuItem>
-                        <DropdownMenuItem>Edit Lead</DropdownMenuItem>
-                        <DropdownMenuItem>Assign Team</DropdownMenuItem>
-                        <DropdownMenuItem className="text-destructive">Delete</DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                    {isAdmin && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+                          <Button variant="ghost" size="icon" className="h-8 w-8">
+                            <MoreHorizontal className="w-4 h-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(`${basePath}/leads/${lead.id}`);
+                          }}>
+                            View Details
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={(e) => openEditModal(lead, e)}>
+                            Edit Lead
+                          </DropdownMenuItem>
+                          <DropdownMenuItem 
+                            className="text-destructive"
+                            onClick={(e) => openDeleteDialog(lead, e)}
+                          >
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          {totalLeads && totalLeads > leads.length && (
+            <div className="px-4 py-2 text-sm text-muted-foreground bg-muted/30 border-t border-border">
+              +{totalLeads - leads.length} more leads
+            </div>
+          )}
         </div>
         
         {leads.length === 0 && (
           <div className="p-12 text-center">
-            <p className="text-muted-foreground">No leads found</p>
+            <p className="text-muted-foreground">{emptyMessage}</p>
           </div>
         )}
       </div>
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Lead</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete "{leadToDelete?.companyName}"? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction 
+            onClick={handleDeleteLead}
+            disabled={isDeleting}
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          >
+            {isDeleting ? 'Deleting...' : 'Delete'}
+          </AlertDialogAction>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Edit Lead Modal */}
+      {leadToEdit && (
+        <CreateLeadModal
+          open={editModalOpen}
+          onOpenChange={setEditModalOpen}
+          editingLead={leadToEdit}
+          onSuccess={() => {
+            setEditModalOpen(false);
+            setLeadToEdit(null);
+          }}
+        />
+      )}
     </>
   );
 }

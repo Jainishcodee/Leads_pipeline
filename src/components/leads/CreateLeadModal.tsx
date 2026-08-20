@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { X, Plus, Trash2, Calendar, ChevronDown, ChevronUp, CheckCircle2, Circle } from 'lucide-react';
 import {
   Dialog,
@@ -10,6 +10,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
+import { PhoneInput } from '@/components/ui/phone-input';
 import {
   Select,
   SelectContent,
@@ -17,11 +19,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { mockFolders, mockUsers } from '@/data/mockData';
 import { toast } from 'sonner';
+import DOMPurify from 'dompurify';
 import { Card, CardContent } from '@/components/ui/card';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import type { TaskStatus, LeadPriority } from '@/types';
+import type { TaskStatus, LeadPriority, Lead } from '@/types';
+import { leadsAPI, tasksAPI, assignmentsAPI, activitiesAPI, foldersAPI, notificationsAPI } from '@/lib/api';
+import { isValidEmail } from '@/lib/validation';
+import { useAuth } from '@/auth/AuthContext';
+import { useFolders } from '@/hooks/useFirebaseData';
+import { useUsers } from '@/hooks/useFirebaseData';
 
 interface Subtask {
   id: string;
@@ -46,9 +53,15 @@ interface CreateLeadModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   defaultFolderId?: string;
+  editingLead?: Lead;
+  onSuccess?: () => void;
 }
 
-export function CreateLeadModal({ open, onOpenChange, defaultFolderId }: CreateLeadModalProps) {
+export function CreateLeadModal({ open, onOpenChange, defaultFolderId, editingLead, onSuccess }: CreateLeadModalProps) {
+  const { user, profile } = useAuth();
+  const organizationId = profile?.organizationId || '';
+  const { folders, loading: foldersLoading } = useFolders(organizationId);
+  const { users, loading: usersLoading } = useUsers(organizationId);
   const [step, setStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState({
@@ -89,6 +102,104 @@ export function CreateLeadModal({ open, onOpenChange, defaultFolderId }: CreateL
     userId: string;
     roleInLead: string;
   }>>([]);
+
+  const [contactPersons, setContactPersons] = useState<Array<{
+    id: string;
+    name: string;
+    phone: string;
+    email: string;
+    whatsapp: string;
+    sameAsPhone: boolean;
+    role: string;
+  }>>([
+    {
+      id: `contact_${Date.now()}`,
+      name: '',
+      phone: '',
+      email: '',
+      whatsapp: '',
+      sameAsPhone: false,
+      role: '',
+    }
+  ]);
+
+  // Pre-fill form data when editing a lead
+  useEffect(() => {
+    if (editingLead && open) {
+      setFormData({
+        folderId: editingLead.folderId || defaultFolderId || '',
+        companyName: editingLead.companyName || '',
+        location: editingLead.location || '',
+        whatsappNumber: editingLead.whatsappNumber || '',
+        emailId: editingLead.emailId || '',
+        interest: editingLead.interest.join(', ') || '',
+        reference: editingLead.reference || '',
+        completeAddress: editingLead.completeAddress || '',
+        managerName: editingLead.managerName || '',
+        managerPhone: editingLead.managerPhone || '',
+        managerEmail: editingLead.managerEmail || '',
+        managerWhatsapp: editingLead.managerWhatsapp || '',
+        priority: editingLead.priority || 'medium',
+        notes: editingLead.notes || '',
+        assignedTo: '',
+        assignedRole: '',
+      });
+      
+      // Load contact persons if available, otherwise create from legacy manager fields
+      if (editingLead.contactPersons && editingLead.contactPersons.length > 0) {
+        setContactPersons(editingLead.contactPersons.map(contact => ({
+          ...contact,
+          sameAsPhone: contact.phone === contact.whatsapp && contact.phone !== '',
+          role: contact.role || '',
+        })));
+      } else if (editingLead.managerName || editingLead.managerPhone || editingLead.managerEmail) {
+        // Migrate legacy data
+        setContactPersons([{
+          id: `contact_${Date.now()}`,
+          name: editingLead.managerName || '',
+          phone: editingLead.managerPhone || '',
+          email: editingLead.managerEmail || '',
+          whatsapp: editingLead.managerWhatsapp || '',
+          sameAsPhone: editingLead.managerPhone === editingLead.managerWhatsapp && editingLead.managerPhone !== '',
+          role: '',
+        }]);
+      }
+      
+      setStep(1);
+    } else if (open && !editingLead) {
+      // Reset form for new lead
+      setFormData({
+        folderId: defaultFolderId || '',
+        companyName: '',
+        location: '',
+        whatsappNumber: '',
+        emailId: '',
+        interest: '',
+        reference: '',
+        completeAddress: '',
+        managerName: '',
+        managerPhone: '',
+        managerEmail: '',
+        managerWhatsapp: '',
+        priority: 'medium',
+        notes: '',
+        assignedTo: '',
+        assignedRole: '',
+      });
+      setContactPersons([{
+        id: `contact_${Date.now()}`,
+        name: '',
+        phone: '',
+        email: '',
+        whatsapp: '',
+        sameAsPhone: false,
+        role: '',
+      }]);
+    }
+  }, [editingLead, open, defaultFolderId]);
+
+  const usersById = new Map(users.map((member) => [member.id, member]));
+  const teamOptions = users;
 
   const updateField = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -190,45 +301,288 @@ export function CreateLeadModal({ open, onOpenChange, defaultFolderId }: CreateL
     setTeamMembers(teamMembers.filter(member => member.id !== memberId));
   };
 
+  // Contact person management
+  const addContactPerson = () => {
+    const newContact = {
+      id: `contact_${Date.now()}`,
+      name: '',
+      phone: '',
+      email: '',
+      whatsapp: '',
+      sameAsPhone: false,
+      role: '',
+    };
+    setContactPersons([...contactPersons, newContact]);
+  };
+
+  const updateContactPerson = (contactId: string, field: string, value: any) => {
+    setContactPersons(contactPersons.map(contact => {
+      if (contact.id === contactId) {
+        const updated = { ...contact, [field]: value };
+        // If phone changes and sameAsPhone is true, update whatsapp
+        if (field === 'phone' && contact.sameAsPhone) {
+          updated.whatsapp = value;
+        }
+        // If whatsapp changes to different value, uncheck sameAsPhone
+        if (field === 'whatsapp' && value !== contact.phone) {
+          updated.sameAsPhone = false;
+        }
+        // If sameAsPhone is checked, copy phone to whatsapp
+        if (field === 'sameAsPhone' && value === true) {
+          updated.whatsapp = contact.phone;
+        }
+        return updated;
+      }
+      return contact;
+    }));
+  };
+
+  const removeContactPerson = (contactId: string) => {
+    if (contactPersons.length > 1) {
+      setContactPersons(contactPersons.filter(contact => contact.id !== contactId));
+    } else {
+      toast.error('At least one contact person is required');
+    }
+  };
+
   const handleSubmit = async () => {
+    if (!user) {
+      toast.error('You must be logged in');
+      return;
+    }
+
+    if (!organizationId) {
+      toast.error('You are not linked to an organization. Please contact an admin.');
+      return;
+    }
+
+    if (!formData.companyName || !formData.folderId) {
+      toast.error('Please fill in all required fields');
+      return;
+    }
+
+    // Validate email formats (company email + any contact emails that were filled in)
+    if (formData.emailId.trim() && !isValidEmail(formData.emailId)) {
+      toast.error('Please enter a valid company email address');
+      return;
+    }
+
+    const invalidContact = contactPersons.find(
+      (contact) => contact.email.trim() && !isValidEmail(contact.email)
+    );
+    if (invalidContact) {
+      toast.error(`Please enter a valid email for ${invalidContact.name || 'the contact person'}`);
+      return;
+    }
+
     setIsSubmitting(true);
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    setIsSubmitting(false);
     
-    // Log what's being created
-    console.log('Creating lead with:', { formData, tasks, teamMembers });
-    
-    toast.success(`Lead created successfully with ${tasks.length} task(s) and ${teamMembers.length} team member(s)!`);
-    onOpenChange(false);
-    setStep(1);
-    setFormData({
-      folderId: defaultFolderId || '',
-      companyName: '',
-      location: '',
-      whatsappNumber: '',
-      emailId: '',
-      interest: '',
-      reference: '',
-      completeAddress: '',
-      managerName: '',
-      managerPhone: '',
-      managerEmail: '',
-      managerWhatsapp: '',
-      priority: 'medium',
-      notes: '',
-      assignedTo: '',
-      assignedRole: '',
-    });
-    setTasks([]);
-    setTeamMembers([]);
+    try {
+      // Get folder info
+      const folder = folders.find(f => f.id === formData.folderId);
+      
+      // Sanitize contact persons
+      const sanitizedContacts = contactPersons
+        .filter(contact => contact.name || contact.phone || contact.email) // Only include non-empty contacts
+        .map(contact => ({
+          id: contact.id,
+          name: DOMPurify.sanitize(contact.name, { ALLOWED_TAGS: [] }),
+          phone: DOMPurify.sanitize(contact.phone, { ALLOWED_TAGS: [] }),
+          email: DOMPurify.sanitize(contact.email, { ALLOWED_TAGS: [] }),
+          whatsapp: DOMPurify.sanitize(contact.whatsapp, { ALLOWED_TAGS: [] }),
+          role: DOMPurify.sanitize(contact.role, { ALLOWED_TAGS: [] }),
+        }));
+
+      // Use first contact for legacy fields (backward compatibility)
+      const firstContact = sanitizedContacts[0] || { name: '', phone: '', email: '', whatsapp: '' };
+      
+      // Sanitize common fields
+      const sanitizedData = {
+        companyName: DOMPurify.sanitize(formData.companyName, { ALLOWED_TAGS: [] }),
+        location: DOMPurify.sanitize(formData.location, { ALLOWED_TAGS: [] }),
+        whatsappNumber: DOMPurify.sanitize(formData.whatsappNumber, { ALLOWED_TAGS: [] }),
+        emailId: DOMPurify.sanitize(formData.emailId, { ALLOWED_TAGS: [] }),
+        interest: formData.interest ? formData.interest.split(',').map(i => DOMPurify.sanitize(i.trim(), { ALLOWED_TAGS: [] })) : [],
+        reference: formData.reference ? DOMPurify.sanitize(formData.reference, { ALLOWED_TAGS: [] }) : null,
+        completeAddress: DOMPurify.sanitize(formData.completeAddress, { ALLOWED_TAGS: [] }),
+        // Legacy fields from first contact
+        managerName: firstContact.name,
+        managerPhone: firstContact.phone,
+        managerEmail: firstContact.email,
+        managerWhatsapp: firstContact.whatsapp,
+        // Contact persons array
+        contactPersons: sanitizedContacts,
+        notes: formData.notes ? DOMPurify.sanitize(formData.notes, { ALLOWED_TAGS: [] }) : null,
+      };
+
+      if (editingLead) {
+        // UPDATE MODE: Update existing lead
+        const leadData: Partial<Lead> = {
+          ...sanitizedData,
+          priority: formData.priority as 'low' | 'medium' | 'high',
+        };
+        
+        await leadsAPI.update(editingLead.id, leadData);
+        
+        // Log edit activity
+        await activitiesAPI.logActivity(
+          editingLead.id,
+          user.uid,
+          user.email?.split('@')[0] || 'User',
+          'lead_edited',
+          `Edited lead ${sanitizedData.companyName}`,
+          organizationId,
+          { companyName: sanitizedData.companyName }
+        );
+        
+        toast.success('Lead updated successfully!');
+        onOpenChange(false);
+        if (onSuccess) onSuccess();
+      } else {
+        // CREATE MODE: Create new lead
+        const leadData: Omit<Lead, 'id' | 'createdAt' | 'updatedAt' | 'lastActivityAt'> = {
+          ...sanitizedData,
+          status: 'new',
+          priority: formData.priority as 'low' | 'medium' | 'high',
+          valueEstimate: null,
+          nextFollowUpDate: null,
+          tags: [],
+          folderId: formData.folderId,
+          folderName: folder?.name || '',
+          organizationId,
+          createdById: user.uid,
+          createdByName: user.email?.split('@')[0] || 'Unknown',
+          convertedAt: null,
+          cancelledAt: null,
+          cancellationReason: null,
+          duplicateOfLeadId: null,
+        };
+
+        const leadId = await leadsAPI.create(leadData);
+        
+        // Create tasks
+        for (const task of tasks.filter(t => t.title)) {
+          const assignedUser = usersById.get(task.assignedToId || '') || null;
+          await tasksAPI.create({
+            leadId,
+            organizationId,
+            assignedToId: task.assignedToId || user.uid,
+            assignedToName: assignedUser?.name || user.email?.split('@')[0] || 'Unassigned',
+            createdById: user.uid,
+            createdByName: user.email?.split('@')[0] || 'User',
+            title: DOMPurify.sanitize(task.title, { ALLOWED_TAGS: [] }),
+            description: task.description ? DOMPurify.sanitize(task.description, { ALLOWED_TAGS: [] }) : null,
+            dueDate: task.dueDate ? new Date(task.dueDate) : null,
+            status: task.status,
+            priority: task.priority,
+            checklist: task.subtasks.map(st => ({
+              id: st.id,
+              text: DOMPurify.sanitize(st.title, { ALLOWED_TAGS: [] }),
+              completed: st.status === 'completed'
+            })),
+          });
+          
+          // Notify the assignee about the new task
+          if (task.assignedToId && task.assignedToId !== user.uid) {
+            await notificationsAPI.create({
+              userId: task.assignedToId,
+              organizationId,
+              type: 'task',
+              title: 'New Task Assigned',
+              message: `${user.email?.split('@')[0] || 'Someone'} assigned you a task: "${task.title}"`,
+              leadId,
+              read: false,
+            });
+          }
+        }
+        
+        // Create team assignments
+        for (const member of teamMembers) {
+          const memberUser = usersById.get(member.userId);
+          await assignmentsAPI.create({
+            leadId,
+            organizationId,
+            userId: member.userId,
+            userName: memberUser?.name || 'Unknown',
+            roleInLead: DOMPurify.sanitize(member.roleInLead, { ALLOWED_TAGS: [] }),
+            createdAt: new Date(),
+          });
+          
+          // Notify the assigned team member
+          if (member.userId !== user.uid) {
+            await notificationsAPI.create({
+              userId: member.userId,
+              organizationId,
+              type: 'lead',
+              title: 'Added to Lead',
+              message: `${user.email?.split('@')[0] || 'Someone'} added you to lead: "${sanitizedData.companyName}"`,
+              leadId,
+              read: false,
+            });
+          }
+        }
+        
+        // Log activity
+        await activitiesAPI.logActivity(
+          leadId,
+          user.uid,
+          user.email?.split('@')[0] || 'User',
+          'lead_created',
+          `Created lead ${sanitizedData.companyName}`,
+          organizationId,
+          { companyName: sanitizedData.companyName }
+        );
+        
+        // Increment folder lead count
+        await foldersAPI.incrementLeadCount(formData.folderId);
+        
+        toast.success(`Lead created successfully with ${tasks.length} task(s) and ${teamMembers.length} team member(s)!`);
+        onOpenChange(false);
+        if (onSuccess) onSuccess();
+      }
+      
+      // Reset form
+      setStep(1);
+      setFormData({
+        folderId: defaultFolderId || '',
+        companyName: '',
+        location: '',
+        whatsappNumber: '',
+        emailId: '',
+        interest: '',
+        reference: '',
+        completeAddress: '',
+        managerName: '',
+        managerPhone: '',
+        managerEmail: '',
+        managerWhatsapp: '',
+        priority: 'medium',
+        notes: '',
+        assignedTo: '',
+        assignedRole: '',
+      });
+      setTasks([]);
+      setTeamMembers([]);
+      
+      // Refresh the page to show updated lead
+      if (!editingLead) {
+        window.location.reload();
+      }
+    } catch (error) {
+      console.error('Error saving lead:', error);
+      toast.error(`Failed to ${editingLead ? 'update' : 'create'} lead. Please try again.`);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="text-xl font-semibold">Create New Lead</DialogTitle>
+          <DialogTitle className="text-xl font-semibold">
+            {editingLead ? 'Edit Lead' : 'Create New Lead'}
+          </DialogTitle>
         </DialogHeader>
 
         <div className="space-y-6 py-4">
@@ -253,11 +607,17 @@ export function CreateLeadModal({ open, onOpenChange, defaultFolderId }: CreateL
                         <SelectValue placeholder="Select folder" />
                       </SelectTrigger>
                       <SelectContent>
-                        {mockFolders.map(folder => (
-                          <SelectItem key={folder.id} value={folder.id}>
-                            {folder.name}
+                        {foldersLoading ? (
+                          <SelectItem value="loading" disabled>
+                            Loading folders...
                           </SelectItem>
-                        ))}
+                        ) : (
+                          folders.map(folder => (
+                            <SelectItem key={folder.id} value={folder.id}>
+                              {folder.name}
+                            </SelectItem>
+                          ))
+                        )}
                       </SelectContent>
                     </Select>
                   </div>
@@ -328,64 +688,114 @@ export function CreateLeadModal({ open, onOpenChange, defaultFolderId }: CreateL
             <div className="space-y-4 animate-fade-in">
               <h3 className="font-medium text-muted-foreground">Manager / Contact Person</h3>
               
+              {/* Contact Persons Section */}
               <div className="grid gap-4">
-                <div className="grid sm:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="managerName">Manager Name *</Label>
-                    <Input
-                      id="managerName"
-                      value={formData.managerName}
-                      onChange={(e) => updateField('managerName', e.target.value)}
-                      placeholder="e.g., Ahmed Al Rashid"
-                      className="input-mocha"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="managerEmail">Manager Email *</Label>
-                    <Input
-                      id="managerEmail"
-                      type="email"
-                      value={formData.managerEmail}
-                      onChange={(e) => updateField('managerEmail', e.target.value)}
-                      placeholder="ahmed@company.com"
-                      className="input-mocha"
-                    />
-                  </div>
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-semibold">Contact Persons</h3>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={addContactPerson}
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Contact
+                  </Button>
                 </div>
 
-                <div className="grid sm:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="managerPhone">Manager Phone *</Label>
-                    <Input
-                      id="managerPhone"
-                      value={formData.managerPhone}
-                      onChange={(e) => updateField('managerPhone', e.target.value)}
-                      placeholder="+971501234567"
-                      className="input-mocha"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="managerWhatsapp">Manager WhatsApp</Label>
-                    <Input
-                      id="managerWhatsapp"
-                      value={formData.managerWhatsapp}
-                      onChange={(e) => updateField('managerWhatsapp', e.target.value)}
-                      placeholder="Same as phone or different"
-                      className="input-mocha"
-                    />
-                  </div>
-                </div>
+                {contactPersons.map((contact, index) => (
+                  <Card key={contact.id} className="p-4">
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h4 className="font-medium text-sm">Contact Person {index + 1}</h4>
+                        {contactPersons.length > 1 && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                            onClick={() => removeContactPerson(contact.id)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="reference">Reference (if any)</Label>
-                  <Input
-                    id="reference"
-                    value={formData.reference}
-                    onChange={(e) => updateField('reference', e.target.value)}
-                    placeholder="e.g., Gulf Food Exhibition, Distributor referral"
-                    className="input-mocha"
-                  />
-                </div>
+                      {/* Name and Email on same row */}
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-2">
+                          <Label htmlFor={`contact-name-${contact.id}`} className="text-xs font-medium">Name *</Label>
+                          <Input
+                            id={`contact-name-${contact.id}`}
+                            value={contact.name}
+                            onChange={(e) => updateContactPerson(contact.id, 'name', e.target.value)}
+                            placeholder="Ahmed Al Rashid"
+                            className="input-mocha h-9 text-sm"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor={`contact-email-${contact.id}`} className="text-xs font-medium">Email *</Label>
+                          <Input
+                            id={`contact-email-${contact.id}`}
+                            type="email"
+                            value={contact.email}
+                            onChange={(e) => updateContactPerson(contact.id, 'email', e.target.value)}
+                            placeholder="ahmed@company.com"
+                            className="input-mocha h-9 text-sm"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Role, Phone, WhatsApp */}
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div className="space-y-2">
+                          <Label htmlFor={`contact-role-${contact.id}`} className="text-xs font-medium">Role *</Label>
+                          <Select value={contact.role} onValueChange={(value) => updateContactPerson(contact.id, 'role', value)}>
+                            <SelectTrigger className="h-10 text-sm">
+                              <SelectValue placeholder="Select role" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="manager">Manager</SelectItem>
+                              <SelectItem value="senior-employee">Senior Employee</SelectItem>
+                              <SelectItem value="hr">HR</SelectItem>
+                              <SelectItem value="owner">Owner</SelectItem>
+                              <SelectItem value="other">Other</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <PhoneInput
+                          id={`contact-phone-${contact.id}`}
+                          label="Phone"
+                          value={contact.phone}
+                          onChange={(value) => updateContactPerson(contact.id, 'phone', value)}
+                          required
+                          className="space-y-1 w-full"
+                        />
+                        <div>
+                          <PhoneInput
+                            id={`contact-whatsapp-${contact.id}`}
+                            label="WhatsApp"
+                            value={contact.whatsapp}
+                            onChange={(value) => updateContactPerson(contact.id, 'whatsapp', value)}
+                            placeholder="Same as phone or different"
+                            disabled={contact.sameAsPhone}
+                            className="space-y-1 w-full"
+                          />
+                          <div className="flex items-center space-x-2 mt-1.5">
+                            <Checkbox
+                              id={`sameAsPhone-${contact.id}`}
+                              checked={contact.sameAsPhone}
+                              onCheckedChange={(checked) => updateContactPerson(contact.id, 'sameAsPhone', checked)}
+                            />
+                            <Label htmlFor={`sameAsPhone-${contact.id}`} className="text-xs font-normal cursor-pointer">
+                              Same as phone
+                            </Label>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </Card>
+                ))}
               </div>
             </div>
           )}
@@ -448,11 +858,17 @@ export function CreateLeadModal({ open, onOpenChange, defaultFolderId }: CreateL
                           <SelectValue placeholder="Select team member" />
                         </SelectTrigger>
                         <SelectContent>
-                          {mockUsers.filter(user => user.role === 'member').map(user => (
-                            <SelectItem key={user.id} value={user.id}>
-                              {user.name} ({user.email})
+                          {usersLoading ? (
+                            <SelectItem value="loading" disabled>
+                              Loading team...
                             </SelectItem>
-                          ))}
+                          ) : (
+                            teamOptions.map((member) => (
+                              <SelectItem key={member.id} value={member.id}>
+                                {member.name} ({member.email})
+                              </SelectItem>
+                            ))
+                          )}
                         </SelectContent>
                       </Select>
                       <Input
@@ -530,11 +946,17 @@ export function CreateLeadModal({ open, onOpenChange, defaultFolderId }: CreateL
                                     <SelectValue placeholder="Select member" />
                                   </SelectTrigger>
                                   <SelectContent>
-                                    {mockUsers.filter(u => u.role === 'member').map(user => (
-                                      <SelectItem key={user.id} value={user.id}>
-                                        {user.name}
+                                    {usersLoading ? (
+                                      <SelectItem value="loading" disabled>
+                                        Loading team...
                                       </SelectItem>
-                                    ))}
+                                    ) : (
+                                      teamOptions.map((member) => (
+                                        <SelectItem key={member.id} value={member.id}>
+                                          {member.name} ({member.email})
+                                        </SelectItem>
+                                      ))
+                                    )}
                                   </SelectContent>
                                 </Select>
                               </div>
@@ -610,11 +1032,17 @@ export function CreateLeadModal({ open, onOpenChange, defaultFolderId }: CreateL
                                           <SelectValue placeholder="Assign" />
                                         </SelectTrigger>
                                         <SelectContent>
-                                          {mockUsers.filter(u => u.role === 'member').map(user => (
-                                            <SelectItem key={user.id} value={user.id}>
-                                              {user.name}
+                                          {usersLoading ? (
+                                            <SelectItem value="loading" disabled>
+                                              Loading team...
                                             </SelectItem>
-                                          ))}
+                                          ) : (
+                                            teamOptions.map((member) => (
+                                              <SelectItem key={member.id} value={member.id}>
+                                                {member.name} ({member.email})
+                                              </SelectItem>
+                                            ))
+                                          )}
                                         </SelectContent>
                                       </Select>
                                       <Button
@@ -681,7 +1109,7 @@ export function CreateLeadModal({ open, onOpenChange, defaultFolderId }: CreateL
                 onClick={handleSubmit}
                 disabled={isSubmitting}
               >
-                {isSubmitting ? 'Creating...' : 'Create Lead'}
+                {isSubmitting ? (editingLead ? 'Saving...' : 'Creating...') : (editingLead ? 'Save' : 'Create Lead')}
               </Button>
             )}
           </div>

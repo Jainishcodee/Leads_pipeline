@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/use-toast";
 import { useAuth } from "@/auth/AuthContext";
 import { getAuthErrorMessage } from "@/auth/authErrors";
+import { getEmailError, getPasswordError } from "@/lib/validation";
 
 type LocationState = {
   from?: { pathname: string };
@@ -20,12 +21,22 @@ const Login = () => {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const from = (location.state as LocationState | null)?.from?.pathname ?? "/";
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+
+    const emailError = getEmailError(email);
+    const passwordError = getPasswordError(password);
+    if (emailError || passwordError) {
+      setErrors({ email: emailError ?? undefined, password: passwordError ?? undefined });
+      return;
+    }
+    setErrors({});
+
     setIsSubmitting(true);
 
     try {
@@ -65,8 +76,15 @@ const Login = () => {
             placeholder="you@mocha.com"
             className="input-mocha"
             value={email}
-            onChange={(event) => setEmail(event.target.value)}
+            onChange={(event) => {
+              setEmail(event.target.value);
+              if (errors.email) setErrors((prev) => ({ ...prev, email: undefined }));
+            }}
+            aria-invalid={!!errors.email}
           />
+          {errors.email && (
+            <p className="text-xs text-destructive">{errors.email}</p>
+          )}
         </div>
         <div className="space-y-2">
           <Label htmlFor="password">Password</Label>
@@ -77,8 +95,15 @@ const Login = () => {
             placeholder="Your password"
             className="input-mocha"
             value={password}
-            onChange={(event) => setPassword(event.target.value)}
+            onChange={(event) => {
+              setPassword(event.target.value);
+              if (errors.password) setErrors((prev) => ({ ...prev, password: undefined }));
+            }}
+            aria-invalid={!!errors.password}
           />
+          {errors.password && (
+            <p className="text-xs text-destructive">{errors.password}</p>
+          )}
         </div>
         <Button
           type="submit"

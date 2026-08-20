@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">mocha-pipeline-Leads</string>
+    <string name="title_activity_main">mocha-pipeline-Leads</string>
+    <string name="package_name">com.leads.app</string>
+    <string name="custom_url_scheme">com.leads.app</string>
+</resources>

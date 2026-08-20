@@ -19,9 +19,14 @@ import {
   DollarSign,
   FileText,
   Users,
-  Sparkles
+  Sparkles,
+  Trash2,
+  Download
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -44,115 +49,787 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { StatusBadge } from '@/components/leads/StatusBadge';
 import { PriorityBadge } from '@/components/leads/PriorityBadge';
+import { CreateLeadModal } from '@/components/leads/CreateLeadModal';
 import { ChatPanel } from '@/components/chat/ChatPanel';
-import { 
-  mockLeads, 
-  mockAssignments, 
-  mockTasks, 
-  mockChatMessages,
-  mockActivities,
-  mockUsers
-} from '@/data/mockData';
-import { format, formatDistanceToNow } from 'date-fns';
+import { format, formatDistanceToNow, isValid } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
-import type { ActivityLog } from '@/types';
+import type { ActivityLog, LeadAttachment } from '@/types';
+import { useLead, useLeadTasks, useLeadActivities, useLeadAssignments, useLeadChat, useUsers } from '@/hooks/useFirebaseData';
+import { leadsAPI, tasksAPI, activitiesAPI, assignmentsAPI, chatAPI, notificationsAPI, attachmentsAPI } from '@/lib/api';
+import { useAuth } from '@/auth/AuthContext';
+import { timestampToDate } from '@/lib/firestore';
+import { uploadVoiceRecording } from '@/lib/voiceRecording';
+import { uploadToCloudinary } from '@/lib/cloudinary';
 
 export default function LeadDetail() {
   const { leadId } = useParams();
   const navigate = useNavigate();
+  const { user, profile } = useAuth();
   const [chatOpen, setChatOpen] = useState(false);
-  const [attachments, setAttachments] = useState<Array<{
-    id: string;
-    name: string;
-    url: string;
-    type: string;
-    size: number;
-    createdAt: Date;
-  }>>([]);
-  const [activeAttachment, setActiveAttachment] = useState<{
-    id: string;
-    name: string;
-    url: string;
-    type: string;
-    size: number;
-    createdAt: Date;
-  } | null>(null);
-  const [activities, setActivities] = useState<ActivityLog[]>(() => 
-    mockActivities.filter(a => a.leadId === leadId)
-  );
-  const [tasks, setTasks] = useState(() => 
-    mockTasks.filter(t => t.leadId === leadId)
-  );
+  const [editMode, setEditMode] = useState(false);
+  const [editLeadModalOpen, setEditLeadModalOpen] = useState(false);
+  const [showConvertDialog, setShowConvertDialog] = useState(false);
+  const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const [cancellationReason, setCancellationReason] = useState('');  
+  const [followUpDate, setFollowUpDate] = useState('');  
+  const [showFollowUpDialog, setShowFollowUpDialog] = useState(false);
+  const [showTaskDialog, setShowTaskDialog] = useState(false);
+  const [showAssignDialog, setShowAssignDialog] = useState(false);
+  const [selectedTaskAssignee, setSelectedTaskAssignee] = useState('');
+  const [newTaskTitle, setNewTaskTitle] = useState('');
+  const [newTaskDescription, setNewTaskDescription] = useState('');
+  const [newTaskDueDate, setNewTaskDueDate] = useState('');
+  const [newTaskPriority, setNewTaskPriority] = useState<'low' | 'medium' | 'high'>('medium');
+  const [selectedAssignee, setSelectedAssignee] = useState('');
+  const [assigneeRole, setAssigneeRole] = useState('');  
+  const [selectedMemberFilter, setSelectedMemberFilter] = useState<string>('all');
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  
+  // Validate leadId immediately
+  useEffect(() => {
+    if (!leadId) {
+      setErrorMessage('Invalid lead ID');
+    } else {
+      setErrorMessage(null);
+    }
+  }, [leadId]);
+  
+  const { lead, loading: leadLoading, refetch: refetchLead } = useLead(leadId);
+  const organizationId = lead?.organizationId || profile?.organizationId || '';
+  const { tasks, loading: tasksLoading, refetch: refetchTasks } = useLeadTasks(leadId, organizationId);
+  const { activities, loading: activitiesLoading, refetch: refetchActivities } = useLeadActivities(leadId, organizationId);
+  const { assignments, loading: assignmentsLoading, refetch: refetchAssignments } = useLeadAssignments(leadId, organizationId);
+  const { users, loading: usersLoading } = useUsers(organizationId);
+  const { messages, refetch: refetchMessages } = useLeadChat(leadId, organizationId);
+  
+  // Calculate unread messages count
+  const unreadMessagesCount = messages.filter(msg => 
+    msg.senderId !== user?.uid && (!msg.readBy || !msg.readBy.includes(user?.uid || ''))
+  ).length;
+  const [attachments, setAttachments] = useState<LeadAttachment[]>([]);
+  const [loadingAttachments, setLoadingAttachments] = useState(true);
+  const [uploadingFiles, setUploadingFiles] = useState<string[]>([]);
   const [highlightedActivityId, setHighlightedActivityId] = useState<string | null>(null);
   const highlightTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const attachmentsRef = useRef(attachments);
+  const [taskReviewNotes, setTaskReviewNotes] = useState<Record<string, string>>({});
+  const [editNotesMode, setEditNotesMode] = useState(false);
+  const [notesText, setNotesText] = useState('');
+  const [savingNotes, setSavingNotes] = useState(false);
 
-  const lead = mockLeads.find(l => l.id === leadId);
-  const assignments = mockAssignments.filter(a => a.leadId === leadId);
-  const messages = mockChatMessages.filter(m => m.leadId === leadId);
+  const toDate = (value: unknown) => (value ? timestampToDate(value) : null);
 
-  const userById = new Map(mockUsers.map(user => [user.id, user]));
+  const safeFormatDate = (value: unknown, dateFormat: string) => {
+    const date = timestampToDate(value);
+    return isValid(date) ? format(date, dateFormat) : '—';
+  };
 
-  const getTaskStatusLabel = (status: string) => {
-    if (status === 'done') return 'Completed';
+  const safeDistanceToNow = (value: unknown) => {
+    const date = timestampToDate(value);
+    return isValid(date) ? formatDistanceToNow(date, { addSuffix: true }) : '—';
+  };
+  
+  const userById = new Map((users || []).map((member) => [member.id, member]));
+  const teamOptions = users || [];
+  const isAdmin = profile?.role === 'admin';
+  const canPinMessages = profile?.role === 'admin' || profile?.role === 'superadmin';
+  
+  // Filter tasks, activities, and attachments based on selected member
+  const filteredTasks = selectedMemberFilter === 'all' 
+    ? tasks 
+    : tasks.filter(task => task.assignedToId === selectedMemberFilter);
+    
+  const filteredActivities = selectedMemberFilter === 'all'
+    ? activities
+    : activities.filter(activity => activity.actorId === selectedMemberFilter);
+    
+  const filteredAttachments = selectedMemberFilter === 'all'
+    ? attachments
+    : attachments.filter(attachment => attachment.uploadedById === selectedMemberFilter);
+
+  const getTaskStatusLabel = (status: string, reviewStatus?: string | null) => {
+    if (status === 'done') {
+      if (reviewStatus === 'pending') return 'Awaiting Review';
+      return 'Completed';
+    }
     if (status === 'in_progress') return 'Ongoing';
     return 'Pending';
   };
 
+  // Handle browser back button for chat panel
+  useEffect(() => {
+    const handlePopState = (e: PopStateEvent) => {
+      if (chatOpen) {
+        // Prevent navigation and just close the chat
+        e.preventDefault();
+        setChatOpen(false);
+        // Push state back to keep user on the same page
+        window.history.pushState({ chatOpen: false }, '');
+      }
+    };
+
+    if (chatOpen) {
+      // Push a new history state when chat opens
+      window.history.pushState({ chatOpen: true }, '');
+      window.addEventListener('popstate', handlePopState);
+    }
+
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [chatOpen]);
+
+  useEffect(() => {
+    // Global error handler for component
+    const handleError = (event: ErrorEvent) => {
+      console.error('Component error:', event.error);
+      setErrorMessage(`An error occurred: ${event.error?.message || 'Unknown error'}`);
+    };
+
+    window.addEventListener('error', handleError);
+    return () => {
+      window.removeEventListener('error', handleError);
+    };
+  }, []);
+
+  // Mark messages as read when chat opens
+  useEffect(() => {
+    if (chatOpen && user?.uid && leadId) {
+      chatAPI.markMessagesAsRead(leadId, user.uid).then(() => {
+        refetchMessages();
+      }).catch(err => {
+        console.error('Failed to mark messages as read:', err);
+      });
+    }
+  }, [chatOpen, user?.uid, leadId]);
+  
   const handleTaskStatusChange = (taskId: string, newStatus: string, taskTitle: string) => {
     // Find the task to get the old status
     const task = tasks.find(t => t.id === taskId);
     if (!task) return;
 
     const oldStatus = task.status;
-    const label = getTaskStatusLabel(newStatus);
-    
-    // Update the task status in state
-    setTasks(prev => prev.map(t => 
-      t.id === taskId ? { ...t, status: newStatus as any } : t
-    ));
-    
-    // Show toast notification
-    toast.success(`Task marked as ${label}`);
-
-    // Create new activity log entry
-    const newActivity: ActivityLog = {
-      id: `act_${Date.now()}_${Math.random()}`,
-      leadId: leadId!,
-      actorId: mockUsers[0]?.id || 'user_1',
-      actorName: mockUsers[0]?.name || 'Current User',
-      actionType: 'task_update',
-      description: `Updated task "${taskTitle}" status from ${getTaskStatusLabel(oldStatus)} to ${label}`,
-      beforeData: { taskId, status: oldStatus },
-      afterData: { taskId, status: newStatus },
-      createdAt: new Date(),
+    const isReviewRequired =
+      newStatus === 'done' &&
+      Boolean(task.createdById) &&
+      task.createdById !== task.assignedToId;
+    const nextReviewStatus = newStatus === 'done' ? (isReviewRequired ? 'pending' : 'approved') : null;
+    const label = getTaskStatusLabel(newStatus, nextReviewStatus);
+    const oldLabel = getTaskStatusLabel(oldStatus, task.reviewStatus || null);
+    const updatePayload: Record<string, unknown> = {
+      status: newStatus,
+      reviewStatus: nextReviewStatus,
+      reviewNote: newStatus === 'done' ? task.reviewNote || null : null,
     };
-
-    // Add the new activity to the beginning of the activities list
-    setActivities(prev => {
-      const updated = [newActivity, ...prev];
-      console.log('Activity added:', newActivity);
-      console.log('Total activities:', updated.length);
-      return updated;
-    });
-
-    // Highlight the new activity
-    setHighlightedActivityId(newActivity.id);
     
-    // Clear the highlight timeout if it exists
-    if (highlightTimeoutRef.current) {
-      clearTimeout(highlightTimeoutRef.current);
-    }
-    
-    // Clear highlight after animation completes (3 seconds)
-    highlightTimeoutRef.current = setTimeout(() => {
-      setHighlightedActivityId(null);
-    }, 3000);
+    // Update the task status
+    tasksAPI.update(taskId, updatePayload as any)
+      .then(async () => {
+        refetchTasks();
+        toast.success(`Task marked as ${label}`);
+
+        if (leadId && user && isReviewRequired && task.createdById) {
+          await notificationsAPI.create({
+            userId: task.createdById,
+            organizationId,
+            type: 'task',
+            title: 'Task ready for review',
+            message: `${user.email?.split('@')[0] || 'A team member'} completed "${taskTitle}". Review required.`,
+            leadId,
+            read: false,
+          });
+        }
+        
+        // Log activity
+        if (leadId && user) {
+          activitiesAPI.logActivity(
+            leadId,
+            user.uid,
+            user.email?.split('@')[0] || 'User',
+            'task_update',
+            `Updated task "${taskTitle}" status from ${oldLabel} to ${label}`,
+            organizationId,
+            { taskId, oldStatus, newStatus }
+          ).then(() => refetchActivities());
+        }
+      })
+      .catch((error) => {
+        console.error('Error updating task:', error);
+        toast.error('Failed to update task');
+      });
   };
+
+  const handleConvert = async () => {
+    if (!leadId || !user) return;
+    
+    try {
+      await leadsAPI.update(leadId, {
+        status: 'converted',
+        convertedAt: new Date(),
+      });
+      
+      await activitiesAPI.logActivity(
+        leadId,
+        user.uid,
+        user.email?.split('@')[0] || 'User',
+        'status_change',
+        'Converted lead to customer',
+        organizationId,
+        { newStatus: 'converted' }
+      );
+      
+      toast.success('Lead converted successfully!');
+      setShowConvertDialog(false);
+      refetchLead();
+      refetchActivities();
+    } catch (error) {
+      console.error('Error converting lead:', error);
+      toast.error('Failed to convert lead');
+    }
+  };
+
+  const handleCancel = async () => {
+    if (!leadId || !user || !cancellationReason) return;
+    
+    try {
+      await leadsAPI.update(leadId, {
+        status: 'cancelled',
+        cancelledAt: new Date(),
+        cancellationReason,
+      });
+      
+      await activitiesAPI.logActivity(
+        leadId,
+        user.uid,
+        user.email?.split('@')[0] || 'User',
+        'status_change',
+        `Cancelled lead: ${cancellationReason}`,
+        organizationId,
+        { newStatus: 'cancelled', reason: cancellationReason }
+      );
+      
+      toast.success('Lead marked as not converted');
+      setShowCancelDialog(false);
+      setCancellationReason('');
+      refetchLead();
+      refetchActivities();
+    } catch (error) {
+      console.error('Error cancelling lead:', error);
+      toast.error('Failed to mark lead as not converted');
+    }
+  };
+
+  const handleDeleteLead = async () => {
+    if (!leadId || !isAdmin) {
+      toast.error('Only admins can delete leads');
+      return;
+    }
+
+    try {
+      setIsDeleting(true);
+      await leadsAPI.delete(leadId);
+      toast.success('Lead deleted successfully');
+      setShowDeleteDialog(false);
+      navigate('/dashboard');
+    } catch (error) {
+      console.error('Error deleting lead:', error);
+      toast.error('Failed to delete lead');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleSaveNotes = async () => {
+    if (!leadId || !user) return;
+    
+    try {
+      setSavingNotes(true);
+      
+      await leadsAPI.update(leadId, {
+        notes: notesText.trim(),
+      });
+      
+      await activitiesAPI.logActivity(
+        leadId,
+        user.uid,
+        user.email?.split('@')[0] || 'User',
+        'note_update',
+        'Updated lead notes',
+        organizationId
+      );
+      
+      toast.success('Notes saved');
+      setEditNotesMode(false);
+      refetchLead();
+      refetchActivities();
+    } catch (error) {
+      console.error('Error saving notes:', error);
+      toast.error('Failed to save notes');
+    } finally {
+      setSavingNotes(false);
+    }
+  };
+
+  const handleCancelNotes = () => {
+    setNotesText(lead?.notes || '');
+    setEditNotesMode(false);
+  };
+
+  const handleToggleChecklistItem = async (taskId: string, itemId: string, currentCompleted: boolean) => {
+    try {
+      const task = tasks.find(t => t.id === taskId);
+      if (!task || !task.checklist) return;
+
+      const updatedChecklist = task.checklist.map(item =>
+        item.id === itemId ? { ...item, completed: !currentCompleted } : item
+      );
+
+      await tasksAPI.update(taskId, { checklist: updatedChecklist });
+      toast.success('Checklist updated');
+      refetchTasks();
+    } catch (error) {
+      console.error('Error updating checklist:', error);
+      toast.error('Failed to update checklist');
+    }
+  };
+
+  const handleSetFollowUp = async () => {
+    if (!leadId || !user || !followUpDate) return;
+    
+    try {
+      await leadsAPI.update(leadId, {
+        nextFollowUpDate: new Date(followUpDate),
+      });
+      
+      await activitiesAPI.logActivity(
+        leadId,
+        user.uid,
+        user.email?.split('@')[0] || 'User',
+        'follow_up_scheduled',
+        `Scheduled follow-up for ${format(new Date(followUpDate), 'MMM d, yyyy')}`,
+        organizationId,
+        { followUpDate }
+      );
+      
+      toast.success('Follow-up scheduled');
+      setShowFollowUpDialog(false);
+      setFollowUpDate('');
+      refetchLead();
+      refetchActivities();
+    } catch (error) {
+      console.error('Error setting follow-up:', error);
+      toast.error('Failed to set follow-up');
+    }
+  };
+
+  const handleCreateTask = async () => {
+    if (!leadId || !user || !newTaskTitle) return;
+    
+    try {
+      const assignedUserId = selectedTaskAssignee || user.uid;
+      const assignedUser = userById.get(assignedUserId);
+      await tasksAPI.create({
+        leadId,
+        organizationId,
+        assignedToId: assignedUserId,
+        assignedToName: assignedUser?.name || user.email?.split('@')[0] || 'Unknown',
+        createdById: user.uid,
+        createdByName: user.email?.split('@')[0] || 'User',
+        title: newTaskTitle,
+        description: newTaskDescription || null,
+        dueDate: newTaskDueDate ? new Date(newTaskDueDate) : null,
+        status: 'todo',
+        priority: newTaskPriority,
+        checklist: [],
+      });
+
+      const alreadyAssigned = assignments.some((assignment) => assignment.userId === assignedUserId);
+      if (!alreadyAssigned && leadId) {
+        await assignmentsAPI.create({
+          leadId,
+          organizationId,
+          userId: assignedUserId,
+          userName: assignedUser?.name || 'Unknown',
+          roleInLead: 'Task Assignee',
+          createdAt: new Date(),
+        });
+        await activitiesAPI.logActivity(
+          leadId,
+          user.uid,
+          user.email?.split('@')[0] || 'User',
+          'team_assigned',
+          `Assigned ${assignedUser?.name || 'team member'} as Task Assignee`,
+          organizationId,
+          { assigneeId: assignedUserId, role: 'Task Assignee' }
+        );
+        refetchAssignments();
+      }
+      
+      // Notify the assignee about the new task
+      if (assignedUserId !== user.uid) {
+        await notificationsAPI.create({
+          userId: assignedUserId,
+          organizationId,
+          type: 'task',
+          title: 'New Task Assigned',
+          message: `${user.email?.split('@')[0] || 'Someone'} assigned you a task: "${newTaskTitle}"`,
+          leadId,
+          read: false,
+        });
+      }
+      
+      await activitiesAPI.logActivity(
+        leadId,
+        user.uid,
+        user.email?.split('@')[0] || 'User',
+        'task_created',
+        `Created task: ${newTaskTitle}`,
+        organizationId,
+        { taskTitle: newTaskTitle }
+      );
+      
+      toast.success('Task created successfully');
+      setShowTaskDialog(false);
+      setNewTaskTitle('');
+      setNewTaskDescription('');
+      setNewTaskDueDate('');
+      setNewTaskPriority('medium');
+      setSelectedTaskAssignee(user.uid);
+      refetchTasks();
+      refetchActivities();
+    } catch (error) {
+      console.error('Error creating task:', error);
+      toast.error('Failed to create task');
+    }
+  };
+
+  const handleDeleteTask = async (taskId: string, taskTitle: string) => {
+    if (!leadId || !user) return;
+    const confirmed = window.confirm(`Delete task "${taskTitle}"? This cannot be undone.`);
+    if (!confirmed) return;
+
+    try {
+      await tasksAPI.delete(taskId);
+      toast.success('Task deleted');
+      await activitiesAPI.logActivity(
+        leadId,
+        user.uid,
+        user.email?.split('@')[0] || 'User',
+        'task_deleted',
+        `Deleted task "${taskTitle}"`,
+        organizationId,
+        { taskId }
+      );
+      refetchTasks();
+      refetchActivities();
+    } catch (error) {
+      console.error('Error deleting task:', error);
+      toast.error('Failed to delete task');
+    }
+  };
+
+  const handleApproveTaskReview = async (taskId: string, taskTitle: string) => {
+    if (!leadId || !user) return;
+
+    try {
+      await tasksAPI.update(taskId, { reviewStatus: 'approved' } as any);
+      toast.success('Task approved');
+      await activitiesAPI.logActivity(
+        leadId,
+        user.uid,
+        user.email?.split('@')[0] || 'User',
+        'task_reviewed',
+        `Approved task "${taskTitle}"`,
+        organizationId,
+        { taskId }
+      );
+      setTaskReviewNotes((prev) => ({ ...prev, [taskId]: '' }));
+      refetchTasks();
+      refetchActivities();
+    } catch (error) {
+      console.error('Error approving task:', error);
+      toast.error('Failed to approve task');
+    }
+  };
+
+  const handleRequestTaskChanges = async (taskId: string, taskTitle: string, assignedToId: string) => {
+    if (!leadId || !user) return;
+    const note = taskReviewNotes[taskId]?.trim();
+    if (!note) {
+      toast.error('Please add a note for the changes needed.');
+      return;
+    }
+
+    try {
+      await tasksAPI.update(taskId, {
+        status: 'todo',
+        reviewStatus: 'changes_requested',
+        reviewNote: note,
+      } as any);
+      await notificationsAPI.create({
+        userId: assignedToId,
+        organizationId,
+        type: 'task',
+        title: 'Changes needed on task',
+        message: `Task "${taskTitle}" needs changes: ${note}`,
+        leadId,
+        read: false,
+      });
+      await activitiesAPI.logActivity(
+        leadId,
+        user.uid,
+        user.email?.split('@')[0] || 'User',
+        'task_reviewed',
+        `Requested changes on task "${taskTitle}"`,
+        organizationId,
+        { taskId, note }
+      );
+      toast.success('Changes requested');
+      setTaskReviewNotes((prev) => ({ ...prev, [taskId]: '' }));
+      refetchTasks();
+      refetchActivities();
+    } catch (error) {
+      console.error('Error requesting task changes:', error);
+      toast.error('Failed to request changes');
+    }
+  };
+
+  const handleAssign = async () => {
+    if (!leadId || !user || !selectedAssignee || !assigneeRole) return;
+    
+    try {
+      const assignee = userById.get(selectedAssignee);
+      if (!assignee) return;
+      
+      await assignmentsAPI.create({
+        leadId,
+        organizationId,
+        userId: selectedAssignee,
+        userName: assignee.name,
+        roleInLead: assigneeRole,
+        createdAt: new Date(),
+      });
+      
+      await activitiesAPI.logActivity(
+        leadId,
+        user.uid,
+        user.email?.split('@')[0] || 'User',
+        'team_assigned',
+        `Assigned ${assignee.name} as ${assigneeRole}`,
+        organizationId,
+        { assigneeId: selectedAssignee, assigneeName: assignee.name, role: assigneeRole }
+      );
+      
+      toast.success(`Assigned ${assignee.name} to lead`);
+      setShowAssignDialog(false);
+      setSelectedAssignee('');
+      setAssigneeRole('');
+      refetchAssignments();
+      refetchActivities();
+    } catch (error) {
+      console.error('Error assigning team member:', error);
+      toast.error('Failed to assign team member');
+    }
+  };
+
+  const handleRemoveAssignment = async (assignmentId: string, userName: string) => {
+    try {
+      await assignmentsAPI.delete(assignmentId);
+      toast.success(`Removed ${userName} from lead`);
+      refetchAssignments();
+    } catch (error) {
+      console.error('Error removing team member:', error);
+      toast.error('Failed to remove team member');
+    }
+  };
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    const kb = bytes / 1024;
+    if (kb < 1024) return `${kb.toFixed(1)} KB`;
+    return `${(kb / 1024).toFixed(1)} MB`;
+  };
+
+  const handleFilesSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? []);
+    if (files.length === 0) return;
+    if (!leadId || !user || !organizationId) return;
+
+    for (const file of files) {
+      const fileId = `file_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+      setUploadingFiles(prev => [...prev, fileId]);
+
+      try {
+        // Validate file size (max 10MB)
+        if (file.size > 10 * 1024 * 1024) {
+          toast.error(`${file.name} is too large. Max size is 10MB`);
+          setUploadingFiles(prev => prev.filter(id => id !== fileId));
+          continue;
+        }
+
+        // Upload to Cloudinary
+        const result = await uploadToCloudinary(file, {
+          folder: `mocha-pipeline/leads/${leadId}`,
+          resourceType: 'auto',
+          onProgress: (progress) => {
+            console.log(`Upload ${file.name}: ${progress.toFixed(0)}%`);
+          },
+          tags: ['lead', leadId, 'attachment']
+        });
+
+        try {
+          const downloadURL = result.secure_url;
+              
+              // Save metadata to Firestore
+              const attachmentId = await attachmentsAPI.create({
+                leadId,
+                organizationId,
+                fileName: file.name,
+                fileUrl: downloadURL,
+                fileType: file.type || 'application/octet-stream',
+                fileSize: file.size,
+                uploadedById: user.uid,
+                uploadedByName: user.email?.split('@')[0] || 'User',
+              });
+
+              // Log activity
+              await activitiesAPI.logActivity(
+                leadId,
+                user.uid,
+                user.email?.split('@')[0] || 'User',
+                'file_uploaded',
+                `Uploaded file: ${file.name}`,
+                organizationId,
+                { fileName: file.name }
+              );
+
+          // Reload attachments
+          await loadAttachments();
+          toast.success(`${file.name} uploaded successfully`);
+        } catch (error) {
+          console.error('Error saving attachment:', error);
+          toast.error(`Failed to save ${file.name}`);
+          setUploadingFiles(prev => prev.filter(id => id !== fileId));
+        }
+      } catch (error) {
+        console.error('Error uploading file:', error);
+        toast.error(`Failed to upload ${file.name}`);
+        setUploadingFiles(prev => prev.filter(id => id !== fileId));
+      }
+    }
+
+    event.target.value = '';
+  };
+
+  const handleDeleteAttachment = async (attachment: LeadAttachment) => {
+    if (!leadId || !user) return;
+    
+    const confirmed = window.confirm(`Delete ${attachment.fileName}?`);
+    if (!confirmed) return;
+
+    try {
+      // Delete from Firestore
+      await attachmentsAPI.delete(attachment.id);
+
+      // Note: Cloudinary file deletion requires backend implementation
+      // Files remain in Cloudinary but are no longer referenced in the database
+
+      // Log activity
+      await activitiesAPI.logActivity(
+        leadId,
+        user.uid,
+        user.email?.split('@')[0] || 'User',
+        'file_deleted',
+        `Deleted file: ${attachment.fileName}`,
+        organizationId,
+        { fileName: attachment.fileName }
+      );
+
+      // Reload attachments
+      await loadAttachments();
+      toast.success('File deleted');
+    } catch (error) {
+      console.error('Error deleting attachment:', error);
+      toast.error('Failed to delete file');
+    }
+  };
+
+  const loadAttachments = async () => {
+    if (!leadId || !organizationId) return;
+    
+    try {
+      setLoadingAttachments(true);
+      const attachmentsList = await attachmentsAPI.getByLead(leadId, organizationId);
+      setAttachments(attachmentsList);
+    } catch (error) {
+      console.error('Error loading attachments:', error);
+      toast.error('Failed to load attachments');
+    } finally {
+      setLoadingAttachments(false);
+    }
+  };
+
+  useEffect(() => {
+    loadAttachments();
+  }, [leadId, organizationId]);
+
+  useEffect(() => {
+    if (showTaskDialog && user?.uid && !selectedTaskAssignee) {
+      setSelectedTaskAssignee(user.uid);
+    }
+  }, [showTaskDialog, user?.uid, selectedTaskAssignee]);
+
+  useEffect(() => {
+    return () => {
+      if (highlightTimeoutRef.current) {
+        clearTimeout(highlightTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (lead?.notes) {
+      setNotesText(lead.notes);
+    }
+  }, [lead]);
+
+  if (errorMessage) {
+    return (
+      <div className="p-8 text-center">
+        <p className="text-destructive font-medium">{errorMessage}</p>
+        <Button 
+          variant="outline" 
+          className="mt-4"
+          onClick={() => navigate(-1)}
+        >
+          Go Back
+        </Button>
+      </div>
+    );
+  }
+
+  if (leadLoading || tasksLoading || activitiesLoading) {
+    return (
+      <div className="p-8 flex items-center justify-center">
+        <p className="text-muted-foreground">Loading lead details...</p>
+      </div>
+    );
+  }
 
   if (!lead) {
     return (
@@ -168,48 +845,6 @@ export default function LeadDetail() {
       </div>
     );
   }
-
-  const handleStatusChange = (status: string) => {
-    toast.success(`Lead marked as ${status}`);
-  };
-
-  const formatFileSize = (bytes: number) => {
-    if (bytes < 1024) return `${bytes} B`;
-    const kb = bytes / 1024;
-    if (kb < 1024) return `${kb.toFixed(1)} KB`;
-    return `${(kb / 1024).toFixed(1)} MB`;
-  };
-
-  const handleFilesSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files ?? []);
-    if (files.length === 0) return;
-
-    const createdAt = new Date();
-    const newAttachments = files.map((file, index) => ({
-      id: `file_${createdAt.getTime()}_${index}`,
-      name: file.name,
-      url: URL.createObjectURL(file),
-      type: file.type || 'application/octet-stream',
-      size: file.size,
-      createdAt,
-    }));
-
-    setAttachments((prev) => [...newAttachments, ...prev]);
-    event.target.value = '';
-  };
-
-  useEffect(() => {
-    attachmentsRef.current = attachments;
-  }, [attachments]);
-
-  useEffect(() => {
-    return () => {
-      attachmentsRef.current.forEach((file) => URL.revokeObjectURL(file.url));
-      if (highlightTimeoutRef.current) {
-        clearTimeout(highlightTimeoutRef.current);
-      }
-    };
-  }, []);
 
   return (
     <div className="flex h-[calc(100vh-3.5rem)] md:h-[calc(100vh-4rem)]">
@@ -232,7 +867,7 @@ export default function LeadDetail() {
               </Button>
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <h1 className="text-lg md:text-2xl font-semibold truncate">{lead.companyName}</h1>
+                  <h1 className="text-lg md:text-2xl font-semibold truncate">{lead?.companyName || 'Unknown Company'}</h1>
                   <div className="flex items-center gap-2">
                     <StatusBadge status={lead.status} />
                     <PriorityBadge priority={lead.priority} />
@@ -241,12 +876,15 @@ export default function LeadDetail() {
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-xs md:text-sm text-muted-foreground">
                   <span className="flex items-center gap-1.5">
                     <MapPin className="w-3 h-3 md:w-4 md:h-4" />
-                    {lead.location}
+                    {lead?.location || 'Not specified'}
                   </span>
                   <span className="hidden sm:inline">•</span>
-                  <span className="hidden sm:inline">{lead.folderName}</span>
+                  <span className="hidden sm:inline">{lead?.folderName || 'No folder'}</span>
                   <span className="hidden md:inline">•</span>
-                  <span className="hidden md:inline">Created {formatDistanceToNow(new Date(lead.createdAt), { addSuffix: true })}</span>
+                  <span className="hidden md:inline">
+                    Created{' '}
+                    {safeDistanceToNow(lead.createdAt)}
+                  </span>
                 </div>
               </div>
             </div>
@@ -258,7 +896,7 @@ export default function LeadDetail() {
                   <Button 
                     className="bg-status-converted hover:bg-status-converted/90 text-primary-foreground text-xs md:text-sm"
                     size="sm"
-                    onClick={() => handleStatusChange('Converted')}
+                    onClick={() => setShowConvertDialog(true)}
                   >
                     <CheckCircle className="w-4 h-4 mr-1" />
                     <span className="hidden sm:inline">Convert</span>
@@ -267,10 +905,10 @@ export default function LeadDetail() {
                     variant="outline"
                     size="sm"
                     className="text-destructive border-destructive hover:bg-destructive/10 text-xs md:text-sm"
-                    onClick={() => handleStatusChange('Cancelled')}
+                    onClick={() => setShowCancelDialog(true)}
                   >
                     <XCircle className="w-4 h-4 mr-1" />
-                    <span className="hidden sm:inline">Cancel</span>
+                    <span className="hidden sm:inline">Not converted</span>
                   </Button>
                 </>
               )}
@@ -281,13 +919,27 @@ export default function LeadDetail() {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                  <DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setEditLeadModalOpen(true)}>
                     <Edit className="w-4 h-4 mr-2" />
                     Edit Lead
                   </DropdownMenuItem>
-                  <DropdownMenuItem>Assign Team</DropdownMenuItem>
-                  <DropdownMenuItem>Add Task</DropdownMenuItem>
-                  <DropdownMenuItem className="text-destructive">Delete Lead</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setShowAssignDialog(true)}>
+                    <Users className="w-4 h-4 mr-2" />
+                    Assign Team
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setShowTaskDialog(true)}>
+                    <Plus className="w-4 h-4 mr-2" />
+                    Add Task
+                  </DropdownMenuItem>
+                  {isAdmin && (
+                    <DropdownMenuItem 
+                      className="text-destructive" 
+                      onClick={() => setShowDeleteDialog(true)}
+                    >
+                      <Trash2 className="w-4 h-4 mr-2" />
+                      Delete Lead
+                    </DropdownMenuItem>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
@@ -295,19 +947,39 @@ export default function LeadDetail() {
 
           {/* Quick Actions */}
           <div className="flex items-center gap-2 overflow-x-auto pb-2 -mx-4 px-4 md:mx-0 md:px-0 md:flex-wrap">
-            <Button variant="outline" size="sm" className="gap-1.5 flex-shrink-0 text-xs md:text-sm h-8">
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="gap-1.5 flex-shrink-0 text-xs md:text-sm h-8"
+              onClick={() => setShowFollowUpDialog(true)}
+            >
               <Calendar className="w-3 h-3 md:w-4 md:h-4" />
               Follow-up
             </Button>
-            <Button variant="outline" size="sm" className="gap-1.5 flex-shrink-0 text-xs md:text-sm h-8">
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="gap-1.5 flex-shrink-0 text-xs md:text-sm h-8"
+              onClick={() => setShowTaskDialog(true)}
+            >
               <Plus className="w-3 h-3 md:w-4 md:h-4" />
               Task
             </Button>
-            <Button variant="outline" size="sm" className="gap-1.5 flex-shrink-0 text-xs md:text-sm h-8">
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="gap-1.5 flex-shrink-0 text-xs md:text-sm h-8"
+              onClick={() => setShowAssignDialog(true)}
+            >
               <Users className="w-3 h-3 md:w-4 md:h-4" />
               Assign
             </Button>
-            <Button variant="outline" size="sm" className="gap-1.5 flex-shrink-0 text-xs md:text-sm h-8">
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="gap-1.5 flex-shrink-0 text-xs md:text-sm h-8"
+              onClick={() => toast.info('AI suggestions coming soon!')}
+            >
               <Sparkles className="w-3 h-3 md:w-4 md:h-4" />
               AI
             </Button>
@@ -332,18 +1004,18 @@ export default function LeadDetail() {
                 <div className="space-y-3 text-sm">
                   <div>
                     <p className="text-muted-foreground">Address</p>
-                    <p className="mt-0.5">{lead.completeAddress}</p>
+                    <p className="mt-0.5">{lead?.completeAddress || 'Not provided'}</p>
                   </div>
                   <div>
                     <p className="text-muted-foreground">Email</p>
-                    <a href={`mailto:${lead.emailId}`} className="text-primary hover:underline mt-0.5 block">
-                      {lead.emailId}
+                    <a href={`mailto:${lead?.emailId || ''}`} className="text-primary hover:underline mt-0.5 block">
+                      {lead?.emailId || 'Not provided'}
                     </a>
                   </div>
                   <div>
                     <p className="text-muted-foreground">WhatsApp</p>
-                    <a href={`https://wa.me/${lead.whatsappNumber.replace(/\+/g, '')}`} className="text-primary hover:underline mt-0.5 block">
-                      {lead.whatsappNumber}
+                    <a href={`https://wa.me/${lead?.whatsappNumber?.replace(/\+/g, '') || ''}`} className="text-primary hover:underline mt-0.5 block">
+                      {lead?.whatsappNumber || 'Not provided'}
                     </a>
                   </div>
                 </div>
@@ -361,24 +1033,24 @@ export default function LeadDetail() {
                 <div className="flex items-center gap-3">
                   <Avatar className="w-12 h-12">
                     <AvatarFallback className="bg-mocha-100 text-mocha-700">
-                      {lead.managerName.split(' ').map(n => n[0]).join('')}
+                      {(lead?.managerName || 'N/A').split(' ').map(n => n[0]).join('')}
                     </AvatarFallback>
                   </Avatar>
                   <div>
-                    <p className="font-medium">{lead.managerName}</p>
-                    <p className="text-sm text-muted-foreground">{lead.managerEmail}</p>
+                    <p className="font-medium">{lead?.managerName || 'Not specified'}</p>
+                    <p className="text-sm text-muted-foreground">{lead?.managerEmail || 'Not provided'}</p>
                   </div>
                 </div>
 
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" className="flex-1" asChild>
-                    <a href={`tel:${lead.managerPhone}`}>
+                    <a href={`tel:${lead?.managerPhone || ''}`}>
                       <Phone className="w-4 h-4 mr-1.5" />
                       Call
                     </a>
                   </Button>
                   <Button variant="outline" size="sm" className="flex-1" asChild>
-                    <a href={`https://wa.me/${lead.managerWhatsapp.replace(/\+/g, '')}`}>
+                    <a href={`https://wa.me/${lead?.managerWhatsapp?.replace(/\+/g, '') || ''}`}>
                       <MessageCircle className="w-4 h-4 mr-1.5" />
                       WhatsApp
                     </a>
@@ -396,7 +1068,7 @@ export default function LeadDetail() {
                 <div>
                   <p className="text-sm text-muted-foreground mb-2">Products Interested</p>
                   <div className="flex flex-wrap gap-2">
-                    {lead.interest.map((item, i) => (
+                    {(lead?.interest || []).map((item, i) => (
                       <Badge key={i} variant="secondary" className="bg-mocha-100 text-mocha-700">
                         {item}
                       </Badge>
@@ -404,11 +1076,11 @@ export default function LeadDetail() {
                   </div>
                 </div>
 
-                {lead.tags.length > 0 && (
+                {(lead?.tags || []).length > 0 && (
                   <div>
                     <p className="text-sm text-muted-foreground mb-2">Tags</p>
                     <div className="flex flex-wrap gap-2">
-                      {lead.tags.map((tag, i) => (
+                      {(lead?.tags || []).map((tag, i) => (
                         <Badge key={i} variant="outline">
                           {tag}
                         </Badge>
@@ -417,7 +1089,7 @@ export default function LeadDetail() {
                   </div>
                 )}
 
-                {lead.valueEstimate && (
+                {(lead?.valueEstimate) && (
                   <div>
                     <p className="text-sm text-muted-foreground">Estimated Value</p>
                     <p className="text-lg font-semibold text-mocha-600 flex items-center gap-1">
@@ -435,7 +1107,7 @@ export default function LeadDetail() {
                     <Users className="w-4 h-4 text-mocha-500" />
                     Assigned Team
                   </h3>
-                  <Button variant="ghost" size="sm">
+                  <Button variant="ghost" size="sm" onClick={() => setShowAssignDialog(true)}>
                     <Plus className="w-4 h-4" />
                   </Button>
                 </div>
@@ -445,13 +1117,33 @@ export default function LeadDetail() {
                     <div key={assignment.id} className="flex items-center gap-3">
                       <Avatar className="w-8 h-8">
                         <AvatarFallback className="bg-mocha-100 text-mocha-700 text-xs">
-                          {assignment.userName?.split(' ').map(n => n[0]).join('')}
+                          {(userById.get(assignment.userId)?.name || assignment.userName || 'U')
+                            .split(' ')
+                            .map(n => n[0])
+                            .join('')}
                         </AvatarFallback>
                       </Avatar>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{assignment.userName}</p>
+                        <p className="text-sm font-medium truncate">
+                          {userById.get(assignment.userId)?.name || assignment.userName}
+                        </p>
+                        <p className="text-xs text-muted-foreground truncate">
+                          {userById.get(assignment.userId)?.email || '—'}
+                        </p>
                         <p className="text-xs text-muted-foreground truncate">{assignment.roleInLead}</p>
                       </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() =>
+                          handleRemoveAssignment(
+                            assignment.id,
+                            userById.get(assignment.userId)?.name || assignment.userName || 'Member'
+                          )
+                        }
+                      >
+                        Remove
+                      </Button>
                     </div>
                   ))}
                 </div>
@@ -461,16 +1153,32 @@ export default function LeadDetail() {
             {/* Right: Tasks & Activity */}
             <div className="lg:col-span-2">
               <Tabs defaultValue="tasks" className="w-full">
-                <TabsList className="w-full justify-start bg-muted/50 p-1">
-                  <TabsTrigger value="tasks" className="flex-1 max-w-32">Tasks</TabsTrigger>
-                  <TabsTrigger value="activity" className="flex-1 max-w-32">Activity</TabsTrigger>
-                  <TabsTrigger value="notes" className="flex-1 max-w-32">Notes</TabsTrigger>
-                  <TabsTrigger value="files" className="flex-1 max-w-32">Files</TabsTrigger>
-                </TabsList>
+                <div className="flex items-center justify-between mb-4">
+                  <TabsList className="bg-muted/50 p-1">
+                    <TabsTrigger value="tasks" className="flex-1 max-w-32">Tasks</TabsTrigger>
+                    <TabsTrigger value="activity" className="flex-1 max-w-32">Activity</TabsTrigger>
+                    <TabsTrigger value="notes" className="flex-1 max-w-32">Notes</TabsTrigger>
+                    <TabsTrigger value="files" className="flex-1 max-w-32">Files</TabsTrigger>
+                  </TabsList>
+                  
+                  {isAdmin && (
+                    <Select value={selectedMemberFilter} onValueChange={setSelectedMemberFilter}>
+                      <SelectTrigger className="w-[180px]">
+                        <SelectValue placeholder="All Members" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Members</SelectItem>
+                        {users.map(user => (
+                          <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
 
                 <TabsContent value="tasks" className="mt-4">
                   <div className="space-y-3">
-                    {tasks.length === 0 ? (
+                    {filteredTasks.length === 0 ? (
                       <div className="card-premium p-8 text-center">
                         <p className="text-muted-foreground">No tasks yet</p>
                         <Button className="btn-mocha mt-4">
@@ -479,90 +1187,149 @@ export default function LeadDetail() {
                         </Button>
                       </div>
                     ) : (
-                      tasks.map((task) => (
-                        <div key={task.id} className="card-premium p-4">
-                          <div className="flex items-start gap-3">
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-start justify-between gap-2">
-                                <p className={cn(
-                                  'font-medium',
-                                  task.status === 'done' && 'line-through text-muted-foreground'
-                                )}>
-                                  {task.title}
-                                </p>
-                                <div className="flex items-center gap-2">
-                                  <Select
-                                    value={task.status}
-                                    onValueChange={(value) => {
-                                      handleTaskStatusChange(task.id, value, task.title);
-                                    }}
-                                  >
-                                    <SelectTrigger className="h-7 text-xs">
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="todo">Pending</SelectItem>
-                                      <SelectItem value="in_progress">Ongoing</SelectItem>
-                                      <SelectItem value="done">Completed</SelectItem>
-                                    </SelectContent>
-                                  </Select>
-                                  <PriorityBadge priority={task.priority} />
+                      filteredTasks.map((task) => {
+                        const isReviewPending = task.status === 'done' && task.reviewStatus === 'pending';
+                        const isFinalized = task.status === 'done' && !isReviewPending;
+                        const canReview = isReviewPending && task.createdById === user?.uid;
+
+                        return (
+                          <div key={task.id} className="card-premium p-4">
+                            <div className="flex items-start gap-3">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <p className={cn(
+                                      'font-medium',
+                                      isFinalized && 'line-through text-muted-foreground'
+                                    )}>
+                                      {task.title}
+                                    </p>
+                                    {isReviewPending && (
+                                      <p className="text-xs text-amber-700 mt-1">Awaiting review</p>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <Select
+                                      value={task.status}
+                                      onValueChange={(value) => {
+                                        handleTaskStatusChange(task.id, value, task.title);
+                                      }}
+                                    >
+                                      <SelectTrigger className="h-7 text-xs">
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="todo">Pending</SelectItem>
+                                        <SelectItem value="in_progress">Ongoing</SelectItem>
+                                        <SelectItem value="done">Completed</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                    <PriorityBadge priority={task.priority} />
+                                    {isAdmin && (
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-7 w-7 text-destructive"
+                                        onClick={() => handleDeleteTask(task.id, task.title)}
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </Button>
+                                    )}
+                                  </div>
                                 </div>
-                              </div>
-                              {task.description && (
-                                <p className="text-sm text-muted-foreground mt-1">
-                                  {task.description}
-                                </p>
-                              )}
-                              <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
-                                <span className="flex items-center gap-1">
-                                  <User className="w-3 h-3" />
-                                  {task.assignedToName}
-                                  {userById.get(task.assignedToId)?.role && (
-                                    <span className="text-[10px] uppercase tracking-wide">
-                                      · {userById.get(task.assignedToId)?.role}
+                                {task.description && (
+                                  <p className="text-sm text-muted-foreground mt-1">
+                                    {task.description}
+                                  </p>
+                                )}
+                                <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+                                  <span className="flex items-center gap-1">
+                                    <User className="w-3 h-3" />
+                                    {userById.get(task.assignedToId)?.name || task.assignedToName || 'Unassigned'}
+                                    {userById.get(task.assignedToId)?.role && (
+                                      <span className="text-[10px] uppercase tracking-wide">
+                                        · {userById.get(task.assignedToId)?.role}
+                                      </span>
+                                    )}
+                                  </span>
+                                  {task.dueDate && (
+                                    <span className="flex items-center gap-1">
+                                      <Calendar className="w-3 h-3" />
+                                      {safeFormatDate(task.dueDate, 'MMM d')}
                                     </span>
                                   )}
-                                </span>
-                                {task.dueDate && (
-                                  <span className="flex items-center gap-1">
-                                    <Calendar className="w-3 h-3" />
-                                    {format(new Date(task.dueDate), 'MMM d')}
-                                  </span>
+                                </div>
+
+                                {canReview && (
+                                  <div className="mt-3 space-y-2">
+                                    <Label htmlFor={`review-note-${task.id}`} className="text-xs text-muted-foreground">
+                                      Review note (required for changes)
+                                    </Label>
+                                    <Textarea
+                                      id={`review-note-${task.id}`}
+                                      value={taskReviewNotes[task.id] || ''}
+                                      onChange={(e) =>
+                                        setTaskReviewNotes((prev) => ({ ...prev, [task.id]: e.target.value }))
+                                      }
+                                      placeholder="Add review notes..."
+                                      className="min-h-[70px]"
+                                    />
+                                    <div className="flex items-center gap-2">
+                                      <Button
+                                        size="sm"
+                                        variant='outline'
+                                        onClick={() => handleApproveTaskReview(task.id, task.title)}
+                                      >
+                                        All good!
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="destructive"
+                                        onClick={() => handleRequestTaskChanges(task.id, task.title, task.assignedToId)}
+                                      >
+                                        Changes needed
+                                      </Button>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {task.checklist && task.checklist.length > 0 && (
+                                  <div className="mt-3 space-y-1.5">
+                                    {task.checklist.map((item) => (
+                                      <div 
+                                        key={item.id} 
+                                        className="flex items-center gap-2 text-sm cursor-pointer hover:bg-muted/50 p-1 rounded"
+                                        onClick={() => handleToggleChecklistItem(task.id, item.id, item.completed)}
+                                      >
+                                        <div className={cn(
+                                          'w-4 h-4 rounded border flex items-center justify-center transition-colors',
+                                          item.completed 
+                                            ? 'bg-mocha-500 border-mocha-500' 
+                                            : 'border-mocha-300 hover:border-mocha-400'
+                                        )}>
+                                          {item.completed && (
+                                            <CheckCircle className="w-3 h-3 text-white" />
+                                          )}
+                                        </div>
+                                        <span className={item.completed ? 'line-through text-muted-foreground' : ''}>
+                                          {item.text}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
                                 )}
                               </div>
-                              {task.checklist && task.checklist.length > 0 && (
-                                <div className="mt-3 space-y-1.5">
-                                  {task.checklist.map((item) => (
-                                    <div key={item.id} className="flex items-center gap-2 text-sm">
-                                      <div className={cn(
-                                        'w-4 h-4 rounded border flex items-center justify-center',
-                                        item.completed 
-                                          ? 'bg-mocha-500 border-mocha-500' 
-                                          : 'border-mocha-300'
-                                      )}>
-                                        {item.completed && (
-                                          <CheckCircle className="w-3 h-3 text-white" />
-                                        )}
-                                      </div>
-                                      <span className={item.completed ? 'line-through text-muted-foreground' : ''}>
-                                        {item.text}
-                                      </span>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
                             </div>
                           </div>
-                        </div>
-                      ))
+                        );
+                      })
                     )}
                   </div>
                 </TabsContent>
 
                 <TabsContent value="activity" className="mt-4">
                   <div className="card-premium p-4">
-                    {activities.length === 0 ? (
+                    {filteredActivities.length === 0 ? (
                       <div className="text-center py-8">
                         <Clock className="w-10 h-10 mx-auto text-muted-foreground/50" />
                         <p className="text-muted-foreground mt-2">No activities yet</p>
@@ -584,7 +1351,7 @@ export default function LeadDetail() {
                         )}
                         
                         <div className="space-y-6 relative z-10">
-                          {activities.map((activity, index) => (
+                          {filteredActivities.map((activity, index) => (
                             <div 
                               key={activity.id} 
                               className="relative pl-10 group"
@@ -604,7 +1371,7 @@ export default function LeadDetail() {
                                   <span className="text-muted-foreground">{activity.description}</span>
                                 </p>
                                 <p className="text-xs text-muted-foreground mt-0.5">
-                                  {formatDistanceToNow(new Date(activity.createdAt), { addSuffix: true })}
+                                  {safeDistanceToNow(activity.createdAt)}
                                 </p>
                               </div>
                             </div>
@@ -617,15 +1384,61 @@ export default function LeadDetail() {
 
                 <TabsContent value="notes" className="mt-4">
                   <div className="card-premium p-5">
-                    {lead.notes ? (
-                      <p className="text-sm whitespace-pre-wrap">{lead.notes}</p>
+                    {editNotesMode ? (
+                      <div className="space-y-4">
+                        <Textarea
+                          value={notesText}
+                          onChange={(e) => setNotesText(e.target.value)}
+                          placeholder="Enter notes about this lead..."
+                          className="min-h-[200px]"
+                        />
+                        <div className="flex gap-2">
+                          <Button 
+                            onClick={handleSaveNotes} 
+                            disabled={savingNotes}
+                            className="btn-mocha"
+                          >
+                            {savingNotes ? 'Saving...' : 'Save Notes'}
+                          </Button>
+                          <Button 
+                            variant="outline" 
+                            onClick={handleCancelNotes}
+                            disabled={savingNotes}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
+                    ) : lead.notes ? (
+                      <div>
+                        <div className="flex justify-between items-start mb-3">
+                          <h3 className="font-semibold">Notes</h3>
+                          {(profile?.role === 'admin' || profile?.role === 'member') && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setEditNotesMode(true)}
+                            >
+                              <Edit className="w-4 h-4 mr-1" />
+                              Edit
+                            </Button>
+                          )}
+                        </div>
+                        <p className="text-sm whitespace-pre-wrap">{lead.notes}</p>
+                      </div>
                     ) : (
                       <div className="text-center py-8">
                         <FileText className="w-10 h-10 mx-auto text-muted-foreground/50" />
                         <p className="text-muted-foreground mt-2">No notes yet</p>
-                        <Button variant="outline" className="mt-4">
-                          Add Note
-                        </Button>
+                        {(profile?.role === 'admin' || profile?.role === 'member') && (
+                          <Button 
+                            variant="outline" 
+                            className="mt-4"
+                            onClick={() => setEditNotesMode(true)}
+                          >
+                            Add Note
+                          </Button>
+                        )}
                       </div>
                     )}
                   </div>
@@ -638,14 +1451,15 @@ export default function LeadDetail() {
                         <div>
                           <h3 className="font-semibold">Files</h3>
                           <p className="text-sm text-muted-foreground">
-                            Upload any file type. Files open in a preview pop-up.
+                            Upload files (max 10MB each). Files are stored securely in cloud storage.
                           </p>
                         </div>
                         <Button
                           variant="outline"
                           onClick={() => fileInputRef.current?.click()}
+                          disabled={uploadingFiles.length > 0}
                         >
-                          Upload Files
+                          {uploadingFiles.length > 0 ? 'Uploading...' : 'Upload Files'}
                         </Button>
                         <input
                           ref={fileInputRef}
@@ -657,32 +1471,61 @@ export default function LeadDetail() {
                       </div>
                     </div>
 
-                    {attachments.length === 0 ? (
+                    {loadingAttachments ? (
+                      <div className="card-premium p-8 text-center">
+                        <p className="text-muted-foreground">Loading attachments...</p>
+                      </div>
+                    ) : filteredAttachments.length === 0 && uploadingFiles.length === 0 ? (
                       <div className="card-premium p-8 text-center">
                         <p className="text-muted-foreground">No files attached</p>
                       </div>
                     ) : (
                       <div className="space-y-3">
-                        {attachments.map((file) => (
-                          <div key={file.id} className="card-premium p-4">
+                        {uploadingFiles.map((fileId) => (
+                          <div key={fileId} className="card-premium p-4 opacity-60">
+                            <div className="flex items-center gap-3">
+                              <div className="min-w-0 flex-1">
+                                <p className="font-medium">Uploading...</p>
+                                <p className="text-xs text-muted-foreground">Please wait</p>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                        {filteredAttachments.map((attachment) => (
+                          <div key={attachment.id} className="card-premium p-4">
                             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                              <div className="min-w-0">
-                                <p className="font-medium truncate">{file.name}</p>
+                              <div className="min-w-0 flex-1">
+                                <p className="font-medium truncate">{attachment.fileName}</p>
                                 <div className="text-xs text-muted-foreground mt-1 flex flex-wrap gap-x-3 gap-y-1">
-                                  <span>{file.type || 'Unknown type'}</span>
-                                  <span>{formatFileSize(file.size)}</span>
+                                  <span>{attachment.fileType || 'Unknown type'}</span>
+                                  <span>{formatFileSize(attachment.fileSize)}</span>
                                   <span>
-                                    {format(file.createdAt, 'MMM d, yyyy • h:mm a')}
+                                    {safeFormatDate(attachment.createdAt, 'MMM d, yyyy • h:mm a')}
                                   </span>
+                                  <span>by {attachment.uploadedByName}</span>
                                 </div>
                               </div>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => setActiveAttachment(file)}
-                              >
-                                View
-                              </Button>
+                              <div className="flex gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  asChild
+                                >
+                                  <a href={attachment.fileUrl} target="_blank" rel="noopener noreferrer" download>
+                                    <Download className="w-4 h-4 mr-1.5" />
+                                    Download
+                                  </a>
+                                </Button>
+                                {(user?.uid === attachment.uploadedById || (profile?.role && ['admin', 'superadmin'].includes(profile.role))) && (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => handleDeleteAttachment(attachment)}
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </Button>
+                                )}
+                              </div>
                             </div>
                           </div>
                         ))}
@@ -703,8 +1546,103 @@ export default function LeadDetail() {
             messages={messages}
             leadId={leadId!}
             onClose={() => setChatOpen(false)}
-            onSendMessage={(msg) => {
-              toast.success('Message sent');
+            canPinMessages={canPinMessages}
+            onPinMessage={async (messageId) => {
+              if (!leadId || !user || !canPinMessages) return;
+
+              try {
+                const pinByName = profile?.name || user.displayName || user.email?.split('@')[0] || 'Admin';
+                await chatAPI.pinMessage(leadId, messageId, user.uid, pinByName);
+                await refetchMessages();
+                toast.success('Message pinned');
+              } catch (error) {
+                console.error('Error pinning message:', error);
+                toast.error('Failed to pin message');
+              }
+            }}
+            onUnpinMessage={async (messageId) => {
+              if (!canPinMessages) return;
+
+              try {
+                await chatAPI.unpinMessage(messageId);
+                await refetchMessages();
+                toast.success('Message unpinned');
+              } catch (error) {
+                console.error('Error unpinning message:', error);
+                toast.error('Failed to unpin message');
+              }
+            }}
+            onSendMessage={async (
+              msg,
+              messageType = 'text',
+              voiceBlob,
+              voiceDuration,
+              imageUrl,
+              imageName,
+              replyToMessageId,
+              replyToMessagePreview
+            ) => {
+              if (!leadId || !user) return;
+
+              try {
+                const organizationId = lead?.organizationId || profile?.organizationId || '';
+                const senderName = profile?.name || user.displayName || user.email?.split('@')[0] || 'User';
+                const senderAvatar = profile?.avatar || '';
+                const senderRole = profile?.role || 'member';
+                
+                if (messageType === 'voice' && voiceBlob) {
+                  // Upload voice recording to Firebase Storage
+                  const voiceUrl = await uploadVoiceRecording(voiceBlob, leadId, user.uid);
+                  
+                  await chatAPI.create({
+                    leadId,
+                    senderId: user.uid,
+                    senderName,
+                    senderAvatar,
+                    senderRole,
+                    message: msg,
+                    messageType: 'voice',
+                    voiceUrl,
+                    voiceDuration,
+                    replyToMessageId,
+                    replyToMessagePreview,
+                    organizationId,
+                  });
+                } else if (messageType === 'image' && imageUrl) {
+                  await chatAPI.create({
+                    leadId,
+                    senderId: user.uid,
+                    senderName,
+                    senderAvatar,
+                    senderRole,
+                    message: imageName || 'Image',
+                    messageType: 'image',
+                    imageUrl,
+                    imageName,
+                    replyToMessageId,
+                    replyToMessagePreview,
+                    organizationId,
+                  });
+                } else {
+                  await chatAPI.create({
+                    leadId,
+                    senderId: user.uid,
+                    senderName,
+                    senderAvatar,
+                    senderRole,
+                    message: msg,
+                    messageType: 'text',
+                    replyToMessageId,
+                    replyToMessagePreview,
+                    organizationId,
+                  });
+                }
+                
+                await refetchMessages();
+              } catch (error) {
+                console.error('Error sending message:', error);
+                toast.error('Failed to send message');
+              }
             }}
           />
         </div>
@@ -720,53 +1658,270 @@ export default function LeadDetail() {
         onClick={() => setChatOpen(!chatOpen)}
       >
         <MessageCircle className="w-5 h-5 md:w-6 md:h-6" />
-        {messages.length > 0 && (
+        {unreadMessagesCount > 0 && (
           <span className="absolute -top-1 -right-1 w-5 h-5 bg-destructive text-destructive-foreground text-xs rounded-full flex items-center justify-center">
-            {messages.length}
+            {unreadMessagesCount}
           </span>
         )}
       </Button>
 
-      <Dialog open={!!activeAttachment} onOpenChange={(open) => !open && setActiveAttachment(null)}>
-        <DialogContent className="max-w-3xl">
+      {/* Convert Dialog */}
+      <Dialog open={showConvertDialog} onOpenChange={setShowConvertDialog}>
+        <DialogContent>
           <DialogHeader>
-            <DialogTitle>File Preview</DialogTitle>
+            <DialogTitle>Convert Lead to Customer</DialogTitle>
           </DialogHeader>
-          {activeAttachment && (
-            <div className="space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="font-medium truncate">{activeAttachment.name}</p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {activeAttachment.type || 'Unknown type'} • {formatFileSize(activeAttachment.size)} •{' '}
-                    {format(activeAttachment.createdAt, 'MMM d, yyyy • h:mm a')}
-                  </p>
-                </div>
-              </div>
-              <div className="border border-border rounded-lg overflow-hidden bg-muted/30">
-                {activeAttachment.type.startsWith('image/') ? (
-                  <img
-                    src={activeAttachment.url}
-                    alt={activeAttachment.name}
-                    className="max-h-[60vh] w-full object-contain"
-                  />
-                ) : activeAttachment.type === 'application/pdf' ? (
-                  <iframe
-                    src={activeAttachment.url}
-                    title={activeAttachment.name}
-                    className="h-[60vh] w-full"
-                  />
-                ) : (
-                  <div className="p-8 text-center text-muted-foreground">
-                    <FileText className="w-10 h-10 mx-auto mb-3 text-muted-foreground/60" />
-                    <p>This file type does not support inline preview.</p>
-                  </div>
-                )}
-              </div>
+          <div className="space-y-4 py-4">
+            <p className="text-sm text-muted-foreground">
+              Are you sure you want to convert this lead to a customer? This action will mark the lead as successfully converted.
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setShowConvertDialog(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleConvert} className="bg-status-converted hover:bg-status-converted/90">
+                Convert Lead
+              </Button>
             </div>
-          )}
+          </div>
         </DialogContent>
       </Dialog>
+
+      {/* Not Converted Dialog */}
+      <Dialog open={showCancelDialog} onOpenChange={setShowCancelDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Mark Lead as Not Converted</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="cancellation-reason">Reason *</Label>
+              <Textarea
+                id="cancellation-reason"
+                value={cancellationReason}
+                onChange={(e) => setCancellationReason(e.target.value)}
+                placeholder="Enter the reason why this lead was not converted..."
+                className="min-h-[100px]"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setShowCancelDialog(false)}>
+                Close
+              </Button>
+              <Button 
+                onClick={handleCancel} 
+                variant="destructive"
+                disabled={!cancellationReason}
+              >
+                Mark as Not Converted
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Lead Confirmation Dialog */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Lead</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this lead? This action cannot be undone and will remove all associated data, tasks, and activities.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteLead}
+              disabled={isDeleting}
+              className="bg-destructive hover:bg-destructive/90"
+            >
+              {isDeleting ? 'Deleting...' : 'Delete Lead'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Follow-up Dialog */}
+      <Dialog open={showFollowUpDialog} onOpenChange={setShowFollowUpDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Schedule Follow-up</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="follow-up-date">Follow-up Date *</Label>
+              <Input
+                id="follow-up-date"
+                type="date"
+                value={followUpDate}
+                onChange={(e) => setFollowUpDate(e.target.value)}
+                min={new Date().toISOString().split('T')[0]}
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setShowFollowUpDialog(false)}>
+                Cancel
+              </Button>
+              <Button 
+                onClick={handleSetFollowUp}
+                disabled={!followUpDate}
+              >
+                Schedule Follow-up
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+      {/* Create Task Dialog */}
+      <Dialog open={showTaskDialog} onOpenChange={setShowTaskDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create New Task</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="task-title">Task Title *</Label>
+              <Input
+                id="task-title"
+                value={newTaskTitle}
+                onChange={(e) => setNewTaskTitle(e.target.value)}
+                placeholder="e.g., Send follow-up email"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="task-description">Description</Label>
+              <Textarea
+                id="task-description"
+                value={newTaskDescription}
+                onChange={(e) => setNewTaskDescription(e.target.value)}
+                placeholder="Add task details..."
+                className="min-h-[80px]"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="task-assignee">Assign To *</Label>
+              <Select value={selectedTaskAssignee} onValueChange={setSelectedTaskAssignee}>
+                <SelectTrigger id="task-assignee">
+                  <SelectValue placeholder="Select a team member" />
+                </SelectTrigger>
+                <SelectContent>
+                  {usersLoading ? (
+                    <SelectItem value="loading" disabled>
+                      Loading team...
+                    </SelectItem>
+                  ) : (
+                    users.map((member) => (
+                      <SelectItem key={member.id} value={member.id}>
+                        {member.name} ({member.email})
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="task-due-date">Due Date</Label>
+                <Input
+                  id="task-due-date"
+                  type="date"
+                  value={newTaskDueDate}
+                  onChange={(e) => setNewTaskDueDate(e.target.value)}
+                  min={new Date().toISOString().split('T')[0]}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="task-priority">Priority</Label>
+                <Select value={newTaskPriority} onValueChange={(v) => setNewTaskPriority(v as any)}>
+                  <SelectTrigger id="task-priority">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="low">Low</SelectItem>
+                    <SelectItem value="medium">Medium</SelectItem>
+                    <SelectItem value="high">High</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setShowTaskDialog(false)}>
+                Cancel
+              </Button>
+              <Button 
+                onClick={handleCreateTask}
+                disabled={!newTaskTitle || !selectedTaskAssignee}
+              >
+                Create Task
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Assign Team Dialog */}
+      <Dialog open={showAssignDialog} onOpenChange={setShowAssignDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Assign Team Member</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="assignee">Team Member *</Label>
+              <Select value={selectedAssignee} onValueChange={setSelectedAssignee}>
+                <SelectTrigger id="assignee">
+                  <SelectValue placeholder="Select a team member" />
+                </SelectTrigger>
+                <SelectContent>
+                  {usersLoading ? (
+                    <SelectItem value="loading" disabled>
+                      Loading team...
+                    </SelectItem>
+                  ) : (
+                    teamOptions.map((member) => (
+                      <SelectItem key={member.id} value={member.id}>
+                        {member.name} ({member.email})
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="role">Role in Lead *</Label>
+              <Input
+                id="role"
+                value={assigneeRole}
+                onChange={(e) => setAssigneeRole(e.target.value)}
+                placeholder="e.g., Sales Representative, Account Manager"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setShowAssignDialog(false)}>
+                Cancel
+              </Button>
+              <Button 
+                onClick={handleAssign}
+                disabled={!selectedAssignee || !assigneeRole}
+              >
+                Assign Team Member
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Lead Modal */}
+      <CreateLeadModal
+        open={editLeadModalOpen}
+        onOpenChange={setEditLeadModalOpen}
+        editingLead={lead}
+        onSuccess={() => {
+          setEditLeadModalOpen(false);
+          refetchLead();
+        }}
+      />
     </div>
   );
 }

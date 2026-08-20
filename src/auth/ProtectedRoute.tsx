@@ -14,28 +14,80 @@ const AuthLoadingScreen = () => (
 );
 
 export function ProtectedRoute({ redirectTo = "/login" }: { redirectTo?: string }) {
-  const { user, loading } = useAuth();
+  const { user, profile, loading } = useAuth();
   const location = useLocation();
 
   if (loading) {
     return <AuthLoadingScreen />;
   }
 
-  if (!user) {
+  if (!user || !profile) {
     return <Navigate to={redirectTo} replace state={{ from: location }} />;
+  }
+
+  if (profile.role === 'superadmin') {
+    return <Navigate to="/super-admin" replace />;
+  }
+
+  if (profile.role === 'admin') {
+    return <Navigate to="/admin" replace />;
+  }
+
+  return <Outlet />;
+}
+
+export function AdminRoute({ redirectTo = "/" }: { redirectTo?: string }) {
+  const { user, profile, loading } = useAuth();
+  const location = useLocation();
+
+  if (loading) {
+    return <AuthLoadingScreen />;
+  }
+
+  if (!user || !profile) {
+    return <Navigate to="/login" replace state={{ from: location }} />;
+  }
+
+  if (profile.role !== 'admin' && profile.role !== 'superadmin') {
+    return <Navigate to={redirectTo} replace />;
   }
 
   return <Outlet />;
 }
 
 export function PublicOnlyRoute({ redirectTo = "/" }: { redirectTo?: string }) {
-  const { user, loading } = useAuth();
+  const { user, profile, loading } = useAuth();
 
   if (loading) {
     return <AuthLoadingScreen />;
   }
 
-  if (user) {
+  if (user && profile) {
+    if (profile.role === 'superadmin') {
+      return <Navigate to="/super-admin" replace />;
+    }
+    if (profile.role === 'admin') {
+      return <Navigate to="/admin" replace />;
+    }
+    return <Navigate to={redirectTo} replace />;
+  }
+
+  return <Outlet />;
+}
+
+export function SuperAdminRoute({ redirectTo = "/" }: { redirectTo?: string }) {
+  const { user, profile, loading } = useAuth();
+  const location = useLocation();
+
+  if (loading) {
+    return <AuthLoadingScreen />;
+  }
+
+  if (!user || !profile) {
+    return <Navigate to="/login" replace state={{ from: location }} />;
+  }
+
+  if (profile.role !== 'superadmin') {
     return <Navigate to={redirectTo} replace />;
   }
 

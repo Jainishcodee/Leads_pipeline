@@ -1,32 +1,92 @@
 import { useState, useRef, useEffect } from 'react';
-import { X, Send, Paperclip, AtSign, Smile } from 'lucide-react';
+import { X, Send, Paperclip, Mic, StopCircle, Smile, Loader2, Download, Reply, Pin, PinOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { cn } from '@/lib/utils';
 import type { ChatMessage } from '@/types';
-import { currentUser } from '@/data/mockData';
+import { useAuth } from '@/auth/AuthContext';
 import { format, isToday, isYesterday } from 'date-fns';
+import { timestampToDate } from '@/lib/firestore';
+import { VoiceRecorder, formatDuration } from '@/lib/voiceRecording';
+import { VoiceMessagePlayer } from './VoiceMessagePlayer';
+import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { toast } from 'sonner';
+import { uploadChatImage, MAX_IMAGE_SIZE, formatFileSize } from '@/lib/imageUpload';
 
 interface ChatPanelProps {
   messages: ChatMessage[];
   leadId: string;
   onClose: () => void;
-  onSendMessage?: (message: string) => void;
+  onSendMessage?: (
+    message: string,
+    messageType?: 'text' | 'voice' | 'image',
+    voiceBlob?: Blob,
+    voiceDuration?: number,
+    imageUrl?: string,
+    imageName?: string,
+    replyToMessageId?: string,
+    replyToMessagePreview?: string
+  ) => Promise<void> | void;
+  onPinMessage?: (messageId: string) => Promise<void> | void;
+  onUnpinMessage?: (messageId: string) => Promise<void> | void;
+  canPinMessages?: boolean;
 }
 
-export function ChatPanel({ messages, leadId, onClose, onSendMessage }: ChatPanelProps) {
+export function ChatPanel({
+  messages,
+  leadId,
+  onClose,
+  onSendMessage,
+  onPinMessage,
+  onUnpinMessage,
+  canPinMessages = false,
+}: ChatPanelProps) {
+  const { user } = useAuth();
   const [newMessage, setNewMessage] = useState('');
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
+  const [replyToMessage, setReplyToMessage] = useState<ChatMessage | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const voiceRecorderRef = useRef<VoiceRecorder | null>(null);
+  const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const handleSend = () => {
+  useEffect(() => {
+    return () => {
+      // Cleanup on unmount
+      if (voiceRecorderRef.current) {
+        voiceRecorderRef.current.cancelRecording();
+      }
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleSend = async () => {
     if (newMessage.trim()) {
-      onSendMessage?.(newMessage);
+      await onSendMessage?.(
+        newMessage,
+        'text',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        replyToMessage?.id,
+        replyToMessage ? getMessagePreview(replyToMessage) : undefined
+      );
       setNewMessage('');
+      setReplyToMessage(null);
     }
   };
 
@@ -34,6 +94,126 @@ export function ChatPanel({ messages, leadId, onClose, onSendMessage }: ChatPane
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
+    }
+  };
+
+  const handleEmojiClick = (emojiData: EmojiClickData) => {
+    setNewMessage(prev => prev + emojiData.emoji);
+    setShowEmojiPicker(false);
+  };
+
+  const startVoiceRecording = async () => {
+    try {
+      voiceRecorderRef.current = new VoiceRecorder();
+      await voiceRecorderRef.current.startRecording();
+      setIsRecording(true);
+      setRecordingDuration(0);
+
+      // Start timer
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingDuration(prev => prev + 1);
+      }, 1000);
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to start recording');
+    }
+  };
+
+  const stopVoiceRecording = async () => {
+    if (!voiceRecorderRef.current) return;
+
+    try {
+      const { blob, duration } = await voiceRecorderRef.current.stopRecording();
+      
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+      }
+
+      setIsRecording(false);
+      setRecordingDuration(0);
+
+      // Send voice message
+      await onSendMessage?.(
+        'Voice message',
+        'voice',
+        blob,
+        duration,
+        undefined,
+        undefined,
+        replyToMessage?.id,
+        replyToMessage ? getMessagePreview(replyToMessage) : undefined
+      );
+      setReplyToMessage(null);
+    } catch (error) {
+      toast.error('Failed to save voice recording');
+    }
+  };
+
+  const cancelVoiceRecording = () => {
+    if (voiceRecorderRef.current) {
+      voiceRecorderRef.current.cancelRecording();
+    }
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+    }
+    setIsRecording(false);
+    setRecordingDuration(0);
+  };
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Reset input
+    e.target.value = '';
+
+    // Check file size
+    if (file.size > MAX_IMAGE_SIZE) {
+      toast.error(`Image is too large. Maximum size is 5MB. Your image is ${formatFileSize(file.size)}`);
+      return;
+    }
+
+    // Check file type
+    if (!file.type.startsWith('image/')) {
+      toast.error('Only image files are allowed');
+      return;
+    }
+
+    if (!user) {
+      toast.error('You must be logged in to send images');
+      return;
+    }
+
+    try {
+      setUploadingImage(true);
+      setUploadProgress(0);
+
+      const imageUrl = await uploadChatImage(
+        file,
+        leadId,
+        user.uid,
+        (progress) => setUploadProgress(progress)
+      );
+
+      // Send image message
+      await onSendMessage?.(
+        file.name,
+        'image',
+        undefined,
+        undefined,
+        imageUrl,
+        file.name,
+        replyToMessage?.id,
+        replyToMessage ? getMessagePreview(replyToMessage) : undefined
+      );
+      setReplyToMessage(null);
+      
+      toast.success('Image sent successfully');
+    } catch (error: any) {
+      console.error('Error uploading image:', error);
+      toast.error(error.message || 'Failed to upload image');
+    } finally {
+      setUploadingImage(false);
+      setUploadProgress(0);
     }
   };
 
@@ -48,7 +228,7 @@ export function ChatPanel({ messages, leadId, onClose, onSendMessage }: ChatPane
     let currentDate = '';
 
     msgs.forEach(msg => {
-      const msgDate = format(new Date(msg.createdAt), 'MMMM d, yyyy');
+      const msgDate = format(timestampToDate(msg.createdAt), 'MMMM d, yyyy');
       if (msgDate !== currentDate) {
         currentDate = msgDate;
         groups.push({ date: msgDate, messages: [msg] });
@@ -60,10 +240,50 @@ export function ChatPanel({ messages, leadId, onClose, onSendMessage }: ChatPane
     return groups;
   };
 
-  const groupedMessages = groupMessagesByDate(messages);
+  const sortedMessages = [...messages].sort(
+    (a, b) => timestampToDate(a.createdAt).getTime() - timestampToDate(b.createdAt).getTime()
+  );
+  const groupedMessages = groupMessagesByDate(sortedMessages);
+  const pinnedMessage = sortedMessages.find((message) => message.isPinned);
+
+  const getMessagePreview = (message: ChatMessage) => {
+    if (message.messageType === 'voice') return '🎵 Voice message';
+    if (message.messageType === 'image') return `📷 ${message.imageName || 'Image'}`;
+    if (message.messageType === 'video') return `🎬 ${message.videoName || 'Video'}`;
+    return message.message;
+  };
+
+  const findMessageById = (messageId?: string) => {
+    if (!messageId) return null;
+    return sortedMessages.find((message) => message.id === messageId) || null;
+  };
+
+  const isMediaMessage = (message: ChatMessage) =>
+    (message.messageType === 'image' && Boolean(message.imageUrl)) ||
+    (message.messageType === 'voice' && Boolean(message.voiceUrl)) ||
+    (message.messageType === 'video' && Boolean(message.videoUrl));
+
+  const getSaveLink = (message: ChatMessage) => {
+    if (message.messageType === 'image') {
+      return {
+        url: message.imageUrl || '',
+        fileName: message.imageName || `chat-image-${message.id}.jpg`,
+      };
+    }
+    if (message.messageType === 'voice') {
+      return {
+        url: message.voiceUrl || '',
+        fileName: `voice-message-${message.id}.webm`,
+      };
+    }
+    return {
+      url: message.videoUrl || '',
+      fileName: message.videoName || `video-message-${message.id}.mp4`,
+    };
+  };
 
   return (
-    <div className="flex flex-col h-full bg-background border-l border-border animate-slide-in-right md:rounded-none">
+    <div className="flex flex-col h-full bg-[hsl(var(--background)/0.8)] backdrop-blur-sm border-l border-border animate-slide-in-right md:rounded-none">
       {/* Header */}
       <div className="flex items-center justify-between p-3 md:p-4 border-b border-border safe-area-inset-top">
         <h3 className="font-semibold text-sm md:text-base">Lead Chat</h3>
@@ -71,6 +291,29 @@ export function ChatPanel({ messages, leadId, onClose, onSendMessage }: ChatPane
           <X className="w-4 h-4 md:w-5 md:h-5" />
         </Button>
       </div>
+
+      {pinnedMessage && (
+        <div className="px-3 md:px-4 py-2 border-b border-border bg-muted/40 flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="text-[11px] text-muted-foreground font-medium uppercase tracking-wide">Pinned message</div>
+            <div className="text-sm truncate">
+              <span className="font-medium mr-1">{pinnedMessage.senderName}:</span>
+              {getMessagePreview(pinnedMessage)}
+            </div>
+          </div>
+          {canPinMessages && onUnpinMessage && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={() => onUnpinMessage(pinnedMessage.id)}
+              title="Unpin message"
+            >
+              <PinOff className="w-4 h-4" />
+            </Button>
+          )}
+        </div>
+      )}
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-6">
@@ -88,7 +331,7 @@ export function ChatPanel({ messages, leadId, onClose, onSendMessage }: ChatPane
             {/* Messages in group */}
             <div className="space-y-4">
               {group.messages.map((message) => {
-                const isSelf = message.senderId === currentUser.id;
+                const isSelf = !!user && message.senderId === user.uid;
                 const isSystem = message.isSystemMessage;
 
                 if (isSystem) {
@@ -108,6 +351,7 @@ export function ChatPanel({ messages, leadId, onClose, onSendMessage }: ChatPane
                   >
                     {!isSelf && (
                       <Avatar className="w-8 h-8 flex-shrink-0">
+                        <AvatarImage src={message.senderAvatar} />
                         <AvatarFallback className="bg-mocha-100 text-mocha-700 text-xs">
                           {message.senderName.split(' ').map(n => n[0]).join('')}
                         </AvatarFallback>
@@ -115,17 +359,110 @@ export function ChatPanel({ messages, leadId, onClose, onSendMessage }: ChatPane
                     )}
                     <div className={cn('flex flex-col', isSelf && 'items-end')}>
                       {!isSelf && (
-                        <span className="text-xs text-muted-foreground mb-1 ml-1">
-                          {message.senderName}
-                        </span>
+                        <div className="flex items-center gap-1.5 mb-1 ml-1">
+                          <span className="text-xs text-muted-foreground">
+                            {message.senderName}
+                          </span>
+                          {(message.senderRole === 'admin' || message.senderRole === 'superadmin') && (
+                            <span className="text-xs text-blue-600 font-medium">
+                              ({message.senderRole === 'superadmin' ? 'Super Admin' : 'Admin'})
+                            </span>
+                          )}
+                        </div>
                       )}
                       <div className={cn(
-                        isSelf ? 'chat-bubble-self' : 'chat-bubble-other'
-                      )}>
-                        {message.message}
+                        isSelf ? 'chat-bubble-self' : 'chat-bubble-other',
+                        'cursor-pointer'
+                      )}
+                      onClick={() => setSelectedMessageId(prev => prev === message.id ? null : message.id)}>
+                        {message.replyToMessageId && (
+                          <div className="mb-2 px-2 py-1 rounded bg-black/10 text-xs border-l-2 border-current/40">
+                            <div className="font-medium opacity-85">Replying to</div>
+                            <div className="opacity-80 truncate">
+                              {findMessageById(message.replyToMessageId)?.senderName || 'Message'}: {message.replyToMessagePreview || findMessageById(message.replyToMessageId)?.message || 'Message'}
+                            </div>
+                          </div>
+                        )}
+                        {message.messageType === 'voice' && message.voiceUrl ? (
+                          <VoiceMessagePlayer 
+                            voiceUrl={message.voiceUrl} 
+                            duration={message.voiceDuration || 0}
+                            isSelf={isSelf}
+                          />
+                        ) : message.messageType === 'image' && message.imageUrl ? (
+                          <div className="flex flex-col gap-2">
+                            <img 
+                              src={message.imageUrl} 
+                              alt={message.imageName || 'Image'}
+                              className="rounded-lg max-w-[250px] max-h-[300px] object-cover cursor-pointer hover:opacity-90 transition-opacity"
+                              onClick={() => window.open(message.imageUrl, '_blank')}
+                            />
+                            {message.imageName && (
+                              <span className="text-xs opacity-70">{message.imageName}</span>
+                            )}
+                          </div>
+                        ) : message.messageType === 'video' && message.videoUrl ? (
+                          <div className="flex flex-col gap-2">
+                            <video
+                              controls
+                              src={message.videoUrl}
+                              className="rounded-lg max-w-[250px] max-h-[300px]"
+                            />
+                            {message.videoName && (
+                              <span className="text-xs opacity-70">{message.videoName}</span>
+                            )}
+                          </div>
+                        ) : (
+                          message.message
+                        )}
                       </div>
+
+                      {selectedMessageId === message.id && (
+                        <div className={cn('flex gap-1 mt-1 mx-1', isSelf && 'justify-end')}>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-xs"
+                            onClick={() => {
+                              setReplyToMessage(message);
+                              setSelectedMessageId(null);
+                            }}
+                          >
+                            <Reply className="w-3.5 h-3.5 mr-1" />
+                            Reply
+                          </Button>
+
+                          {isMediaMessage(message) && (() => {
+                            const saveLink = getSaveLink(message);
+                            return (
+                              <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" asChild>
+                                <a href={saveLink.url} download={saveLink.fileName} target="_blank" rel="noopener noreferrer" onClick={() => setSelectedMessageId(null)}>
+                                  <Download className="w-3.5 h-3.5 mr-1" />
+                                  Save
+                                </a>
+                              </Button>
+                            );
+                          })()}
+
+                          {canPinMessages && onPinMessage && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 px-2 text-xs"
+                              onClick={async () => {
+                                await onPinMessage(message.id);
+                                setSelectedMessageId(null);
+                              }}
+                            >
+                              <Pin className="w-3.5 h-3.5 mr-1" />
+                              Pin
+                            </Button>
+                          )}
+                        </div>
+                      )}
+
                       <span className="text-xs text-muted-foreground mt-1 mx-1">
-                        {formatMessageDate(new Date(message.createdAt))}
+                        {formatMessageDate(timestampToDate(message.createdAt))}
                       </span>
                     </div>
                   </div>
@@ -139,36 +476,121 @@ export function ChatPanel({ messages, leadId, onClose, onSendMessage }: ChatPane
 
       {/* Input */}
       <div className="p-3 md:p-4 border-t border-border safe-area-inset-bottom">
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="icon" className="flex-shrink-0 h-8 w-8 md:h-10 md:w-10">
-            <Paperclip className="w-4 h-4 md:w-5 md:h-5 text-muted-foreground" />
-          </Button>
-          <div className="relative flex-1">
+        {replyToMessage && (
+          <div className="mb-2 px-3 py-2 rounded-lg bg-muted/60 border border-border flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <div className="text-xs text-muted-foreground">Replying to {replyToMessage.senderName}</div>
+              <div className="text-sm truncate">{getMessagePreview(replyToMessage)}</div>
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6"
+              onClick={() => setReplyToMessage(null)}
+            >
+              <X className="w-3.5 h-3.5" />
+            </Button>
+          </div>
+        )}
+
+        {uploadingImage ? (
+          <div className="flex items-center gap-2">
+            <div className="flex-1 flex items-center gap-2 bg-primary/10 rounded-lg px-3 py-2">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              <div className="flex-1">
+                <div className="text-sm font-medium">Uploading image...</div>
+                <div className="text-xs text-muted-foreground">{Math.round(uploadProgress)}%</div>
+              </div>
+            </div>
+          </div>
+        ) : isRecording ? (
+          <div className="flex items-center gap-2">
+            <div className="flex-1 flex items-center gap-2 bg-destructive/10 rounded-lg px-3 py-2">
+              <div className="w-2 h-2 bg-destructive rounded-full animate-pulse" />
+              <span className="text-sm font-medium">{formatDuration(recordingDuration)}</span>
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9 text-muted-foreground"
+              onClick={cancelVoiceRecording}
+            >
+              <X className="w-4 h-4" />
+            </Button>
+            <Button
+              className="btn-mocha h-9 w-9"
+              size="icon"
+              onClick={stopVoiceRecording}
+            >
+              <StopCircle className="w-4 h-4" />
+            </Button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <input 
+              ref={fileInputRef}
+              type="file" 
+              accept="image/*" 
+              id="file-input" 
+              className="hidden"
+              onChange={handleFileSelect}
+            />
+            <label htmlFor="file-input">
+              <Button variant="ghost" size="icon" className="flex-shrink-0 h-8 w-8 md:h-10 md:w-10" asChild>
+                <span>
+                  <Paperclip className="w-4 h-4 md:w-5 md:h-5 text-muted-foreground" />
+                </span>
+              </Button>
+            </label>
+            
+            {/* Emoji Picker */}
+            <Popover open={showEmojiPicker} onOpenChange={setShowEmojiPicker}>
+              <PopoverTrigger asChild>
+                <Button variant="ghost" size="icon" className="flex-shrink-0 h-8 w-8 md:h-10 md:w-10">
+                  <Smile className="w-4 h-4 md:w-5 md:h-5 text-muted-foreground" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-full p-0 border-0" align="start">
+                <EmojiPicker 
+                  onEmojiClick={handleEmojiClick}
+                  width={300}
+                  height={400}
+                />
+              </PopoverContent>
+            </Popover>
+
             <Input
               value={newMessage}
               onChange={(e) => setNewMessage(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Type a message..."
-              className="input-mocha pr-16 md:pr-20 h-9 md:h-10 text-sm"
+              className="flex-1 input-mocha h-9 md:h-10 text-sm"
             />
-            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-0.5 md:gap-1">
-              <Button variant="ghost" size="icon" className="h-6 w-6 md:h-7 md:w-7">
-                <AtSign className="w-3.5 h-3.5 md:w-4 md:h-4 text-muted-foreground" />
+
+            {/* Voice Recording Button */}
+            {!newMessage.trim() && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="flex-shrink-0 h-9 w-9 md:h-10 md:w-10"
+                onClick={startVoiceRecording}
+              >
+                <Mic className="w-4 h-4 md:w-5 md:h-5 text-muted-foreground" />
               </Button>
-              <Button variant="ghost" size="icon" className="h-6 w-6 md:h-7 md:w-7 hidden sm:flex">
-                <Smile className="w-3.5 h-3.5 md:w-4 md:h-4 text-muted-foreground" />
+            )}
+            
+            {/* Send Button */}
+            {newMessage.trim() && (
+              <Button 
+                className="btn-mocha flex-shrink-0 h-9 w-9 md:h-10 md:w-10"
+                size="icon"
+                onClick={handleSend}
+              >
+                <Send className="w-4 h-4" />
               </Button>
-            </div>
+            )}
           </div>
-          <Button 
-            className="btn-mocha flex-shrink-0 h-9 w-9 md:h-10 md:w-10"
-            size="icon"
-            onClick={handleSend}
-            disabled={!newMessage.trim()}
-          >
-            <Send className="w-4 h-4" />
-          </Button>
-        </div>
+        )}
       </div>
     </div>
   );
