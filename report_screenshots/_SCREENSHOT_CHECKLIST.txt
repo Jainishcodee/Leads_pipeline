@@ -1,0 +1,38 @@
+SCREENSHOT DROP-IN CHECKLIST
+============================================================
+Save each Instagram screenshot into this folder using the file
+name shown below (e.g. 01.png), then re-run generate_report.py.
+Matching files are embedded automatically; missing ones stay as
+labelled placeholders. Accepted types: .png .jpg .jpeg .webp
+============================================================
+
+01.png  [ pending ]  @revolut — pinned card-hero brand post (Haaland x Revolut card) showing the premium dark visual system
+02.png  [ pending ]  @revolut — F1-sponsorship carousel (e.g. Silverstone / Audi F1 home race, ~15.8K likes) showing carousel format + brand storytelling
+03.png  [ pending ]  @nubank — a real customer-story post/Reel (person + purple brand frame)
+04.png  [ pending ]  @nubank — a witty social reply or community-language post
+05.png  [ pending ]  @robinhoodapp — app-portfolio / data-as-hero shot (e.g. $163,918.10, HODL/Retirement/Vacation, neon-green chart)
+06.png  [ pending ]  @robinhoodapp — premium editorial brand campaign (e.g. 'The World is Flat — See what we announced', gold typographic system)
+07.png  [ pending ]  @wise — a 'real cost / hidden fees' comparison graphic
+08.png  [ pending ]  @wise — a flat-illustration 'how your money moves' carousel
+09.png  [ pending ]  @chime — a 'get paid early' benefit post/Reel
+10.png  [ pending ]  @chime — a member-win / savings-goal story
+11.png  [ pending ]  @cred_club — a flagship campaign film still (e.g. 'Indiranagar Ka Gunda' / celebrity)
+12.png  [ pending ]  @cred_club — a minimalist member-perk post
+13.png  [ pending ]  @groww_official — an investing-basics infographic carousel
+14.png  [ pending ]  @groww_official — a myth-vs-fact or 'save this' post
+15.png  [ pending ]  @zerodhaonline — a Varsity-style education carousel
+16.png  [ pending ]  @zerodhaonline — a founder-voice / responsible-investing post
+17.png  [ pending ]  @etmoney_official — a SIP/SWP educational carousel or Reel (e.g. 'The real story behind SWP')
+18.png  [ pending ]  @etmoney_official — a fund-selection or tax-saving (ELSS/80C) explainer carousel
+19.png  [ pending ]  @motilaloswalmf — a SIP/SWP strategy or investor-education post/Reel (e.g. 'Is SIP good during market falls?', 'Buy Right, Sit Tight')
+20.png  [ pending ]  @motilaloswalmf — a fund-insight / market-education carousel or fund-manager expert Reel
+21.png  [ pending ]  @lendingkart_finance — an MSME growth-tip / motivational post
+22.png  [ pending ]  @lendingkart_finance — a business-loan promotional creative with CTA
+23.png  [ pending ]  @tarrakki — a beginner investing / SIP explainer
+24.png  [ pending ]  @tarrakki — a short educational Reel or quiz post
+25.png  [ pending ]  @fundzbazaar — a mutual-fund / SIP awareness info-card
+26.png  [ pending ]  @fundzbazaar — a tax-season / ELSS planning post
+27.png  [ pending ]  @digipay.guru — a solution/feature reel (e.g. eKYC or remittance)
+28.png  [ pending ]  @digipay.guru — a 'book a demo' B2B creative
+29.png  [ pending ]  @edufund_app — a child-education / cost-of-study infographic carousel
+30.png  [ pending ]  @edufund_app — a live-session or parent Q&A / goal-planning post

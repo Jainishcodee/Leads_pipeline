@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "52119654233",
+    "project_id": "mocha-cafe-e6fa0",
+    "storage_bucket": "mocha-cafe-e6fa0.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:52119654233:android:533f263a14f249e6de4648",
+        "android_client_info": {
+          "package_name": "com.leads.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC2z3pf-35Llmsl7hG2vK5DR-aQR6bEshs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

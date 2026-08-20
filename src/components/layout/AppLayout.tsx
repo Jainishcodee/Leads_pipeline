@@ -43,6 +43,7 @@ export function AppLayout() {
       } else if (idleId !== null) {
         globalThis.clearTimeout(idleId);
       }
+      
     };
   }, []);
 

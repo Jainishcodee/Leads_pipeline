@@ -1,0 +1,14 @@
+# Python virtualenv — never commit
+.venv/
+_meta/
+
+# Byte-compiled
+__pycache__/
+*.py[cod]
+
+# Local run artifacts
+replays/
+logs/
+out/
+*.log
+submission.tar.gz
